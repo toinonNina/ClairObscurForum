@@ -431,6 +431,11 @@ const routes = [
   [/^\/moderation(?:\/(\w+))?$/, viewModeration],
   [/^\/regles$/, viewRules],
   [/^\/messages$/, viewInbox],
+  [/^\/predefinis$/, viewPredefList],
+  [/^\/predefini\/nouveau$/, viewPredefForm],
+  [/^\/predefini\/demande$/, viewPredefForm],
+  [/^\/predefini\/(\d+)$/, viewPredef],
+  [/^\/predefini\/(\d+)\/modifier$/, viewPredefForm],
   [/^\/messages\/nouveau$/, viewCompose],
   [/^\/messages\/(\d+)$/, viewConversation],
   [/^\/univers$/, viewWikiIndex],
@@ -512,6 +517,7 @@ async function viewHome() {
     sb.from('profiles').select('username,role,last_seen').gte('last_seen', since24).order('last_seen', { ascending: false }).limit(200),
     sb.from('characters').select('faction').eq('status', 'approved').limit(5000),
   ]);
+  const { count: predefOpen } = await sb.from('predefined_characters').select('id', { count: 'exact', head: true }).eq('status', 'open');
   const { data: staffList } = await sb.from('profiles').select('username,role,title,avatar_url').in('role', ['admin', 'moderator']).eq('banned', false).order('created_at');
   const admins = (staffList || []).filter((m) => m.role === 'admin');
   const mods = (staffList || []).filter((m) => m.role === 'moderator');
@@ -604,6 +610,7 @@ async function viewHome() {
             <li><a href="#/univers/reglement-rp">❦ Règlement RP</a></li>
             <li><a href="#/fiche/nouvelle">❦ Créer mon personnage</a></li>
             <li><a href="#/personnages">❦ Galerie des personnages</a></li>
+            <li><a href="#/predefinis">❦ Personnages prédéfinis</a></li>
           </ul>
         </div>
         ${staffCol}
@@ -620,6 +627,7 @@ async function viewHome() {
     ${group('Le Grimoire', 'Avant d’entrer', [
       wikiRow('#/univers/contexte', '📜', 'L’univers', 'La Fracture, les factions, les territoires de Paris : tout ce qu’il faut savoir avant de jouer.'),
       wikiRow('#/personnages', '🎭', 'Les personnages', 'Galerie des fiches validées, à filtrer par faction.'),
+      wikiRow('#/predefinis', '🗝️', `Les prédéfinis${predefOpen ? ` <span class="pill pill-gold">${predefOpen} disponible${predefOpen > 1 ? 's' : ''}</span>` : ''}`, 'Des personnages imaginés par l’équipe, liés à l’intrigue, qui attendent leur joueur.'),
     ].join('') + hrpStart.map(forumRow).join(''))}
     ${group('Paris', 'En jeu', rp.map(forumRow).join(''))}
     ${group('Hors-jeu', 'Entre joueurs', hrpEnd.map(forumRow).join(''))}
@@ -1297,7 +1305,7 @@ async function viewCharacters([faction]) {
   const tabs = [['', 'Tous'], ...FACTION_LIST.map((f) => [f.value, `${f.icon} ${f.value.replace('Musiciens — ', '')}`])].map(([v, l]) =>
     `<a href="#/personnages${v ? '/' + encodeURIComponent(v) : ''}" class="${(faction || '') === v ? 'active' : ''}">${esc(l)}</a>`).join('');
   return `<div class="page-head"><div><h1>Les personnages</h1><p class="muted">Ceux qui arpentent les ruines de Paris après la Fracture.</p></div>
-      ${canWrite() ? '<a class="btn" href="#/fiche/nouvelle">✒ Créer un personnage</a>' : ''}</div>
+      <span><a class="btn btn-ghost" href="#/predefinis">🗝️ Prédéfinis</a> ${canWrite() ? '<a class="btn" href="#/fiche/nouvelle">✒ Créer un personnage</a>' : ''}</span></div>
     ${mine.length ? `<h2 class="section-title">Mes fiches en cours</h2><div class="char-grid">${mine.map(charCard).join('')}</div>` : ''}
     <nav class="tabs">${tabs}</nav>
     <div class="char-grid">${chars.map(charCard).join('') || '<div class="card empty">Aucun personnage validé ici pour l’instant.</div>'}</div>`;
@@ -1654,6 +1662,209 @@ viewConversation.after = (root, [idStr]) => {
       await q(sb.from('conversation_members').update({ hidden: true }).eq('conversation_id', id).eq('user_id', state.profile.id));
       toast('Conversation retirée de votre boîte. Elle reviendra si quelqu’un y répond.', 'ok');
       go('#/messages');
+    } catch (err) { fail(err); }
+  });
+};
+
+// ---------------------------------------------------------------------
+//  Personnages prédéfinis (proposés par l’équipe ou demandés par un membre)
+// ---------------------------------------------------------------------
+const PREDEF_STATUS = {
+  open: ['Disponible', 'st-approved'], reserved: ['Réservé', 'st-pending'], taken: ['Pris', 'st-archived'],
+  pending: ['Demande en attente', 'st-pending'], refused: ['Demande refusée', 'st-rejected'],
+};
+const PUBLISHED = ['open', 'reserved', 'taken'];
+const predefBadge = (st) => `<span class="badge badge-${PREDEF_STATUS[st][1]}">${PREDEF_STATUS[st][0]}</span>`;
+const PREDEF_EMBEDS = 'reserved:profiles!predefined_characters_reserved_by_fkey(username,role),requester:profiles!predefined_characters_requested_by_fkey(username,role),character:characters!predefined_characters_character_id_fkey(id,name,status,owner_id),linked:characters!predefined_characters_linked_character_id_fkey(id,name)';
+const PREDEF_COLS = `id,name,faction,age,occupation,avatar_url,quote,summary,status,position,requested_by,created_at,${PREDEF_EMBEDS}`;
+
+async function viewPredefList(_, params) {
+  setTitle('Personnages prédéfinis');
+  const tab = params.get('voir') || 'tous';
+  let query = sb.from('predefined_characters').select(PREDEF_COLS);
+  if (tab === 'disponibles') query = query.eq('status', 'open');
+  else if (tab === 'demandes' && isStaff()) query = query.in('status', ['pending', 'refused']);
+  else if (tab === 'mes-demandes' && state.profile) query = query.eq('requested_by', state.profile.id);
+  else query = query.in('status', PUBLISHED);
+  const list = await q(query.order('position').order('created_at'));
+  let pendingCount = 0;
+  if (isStaff()) ({ count: pendingCount } = await sb.from('predefined_characters').select('id', { count: 'exact', head: true }).eq('status', 'pending'));
+  const card = (p) => `
+    <a class="char-card card predef-card ${facClass(p.faction)} predef-${p.status}" href="#/predefini/${p.id}">
+      ${charAvatar(p, 'xl')}
+      <b>${esc(p.name)}</b>
+      <span class="small muted">${esc(p.occupation || '')}${p.age != null ? ` · ${p.age} ans` : ''}</span>
+      ${factionBadge(p.faction)}
+      ${p.summary ? `<span class="small predef-summary">${esc(p.summary)}</span>` : ''}
+      ${predefBadge(p.status)}
+      ${p.status === 'reserved' && p.reserved ? `<span class="small muted">par ${esc(p.reserved.username)}</span>` : ''}
+      ${p.requester ? `<span class="small muted">Proposé par ${esc(p.requester.username)}${p.linked ? ` · lié à ${esc(p.linked.name)}` : ''}</span>` : ''}
+    </a>`;
+  const t = (key, label) => `<a href="#/predefinis${key === 'tous' ? '' : '?voir=' + key}" class="${tab === key ? 'active' : ''}">${label}</a>`;
+  return `<div class="page-head"><div><h1>Personnages prédéfinis</h1>
+      <p class="muted">Des rôles liés à l’intrigue ou aux personnages déjà présents. Choisissez-en un : sa fiche sera pré-remplie pour vous.</p></div>
+      <span>${canWrite() ? '<a class="btn btn-ghost" href="#/predefini/demande">✒ Demander un prédéfini</a>' : ''}
+      ${isStaff() ? ' <a class="btn" href="#/predefini/nouveau">+ Nouveau prédéfini</a>' : ''}</span></div>
+    <nav class="tabs">${t('tous', 'Tous')}${t('disponibles', 'Disponibles')}${state.profile ? t('mes-demandes', 'Mes demandes') : ''}${isStaff() ? t('demandes', `Demandes à valider${pendingCount ? ` <span class="pill">${pendingCount}</span>` : ''}`) : ''}</nav>
+    ${tab === 'mes-demandes' ? '<p class="small muted">Vous voulez qu’un frère, une rivale ou un ancien maître de votre personnage soit joué par quelqu’un d’autre ? Remplissez une demande : l’équipe la relit, puis la publie dans les prédéfinis à votre nom.</p>' : ''}
+    <div class="char-grid">${list.map(card).join('') || '<div class="card empty">Rien ici pour l’instant.</div>'}</div>`;
+}
+
+async function viewPredef([idStr]) {
+  const p = await q(sb.from('predefined_characters').select(`*,${PREDEF_EMBEDS}`).eq('id', Number(idStr)).maybeSingle());
+  if (!p) return `<div class="card empty"><h2>Prédéfini introuvable</h2><p><a href="#/predefinis">Retour</a></p></div>`;
+  setTitle(p.name);
+  const section = (title, text) => (text ? `<section class="fiche-section"><h3>${title}</h3><div class="post-body">${renderContent(text)}</div></section>` : '');
+  const me = state.profile;
+  const isRequester = me && p.requested_by === me.id;
+  const reservedMine = me && p.reserved_by === me.id;
+  let action = '';
+  if (p.status === 'open') {
+    action = !state.session ? '<a class="btn" href="#/connexion">Connectez-vous pour le jouer</a>'
+      : canWrite() ? '<button class="btn" id="claim">🗝️ Je veux le jouer</button>' : '';
+  } else if (p.status === 'reserved') {
+    action = reservedMine && p.character ? `<a class="btn" href="#/fiche/${p.character.id}/modifier">Compléter ma fiche</a>` : `<span class="muted">Réservé par ${userLink(p.reserved)}</span>`;
+  } else if (p.status === 'taken') {
+    action = p.character ? `<span class="muted">Joué par ${userLink(p.reserved)} · <a href="#/perso/${p.character.id}">voir la fiche</a></span>` : '';
+  } else if (isRequester) {
+    action = `<a class="btn btn-ghost" href="#/predefini/${p.id}/modifier">${p.status === 'refused' ? 'Corriger et renvoyer' : 'Modifier ma demande'}</a>
+      <button class="btn btn-ghost danger" id="withdraw">Retirer</button>`;
+  }
+  const isRequest = !PUBLISHED.includes(p.status);
+  const requestBox = isRequest ? `
+    <div class="card notice ${p.status === 'refused' ? 'notice-bad' : ''}">
+      <b>${p.status === 'pending' ? '⏳ Demande en attente de validation par l’équipe.' : '✗ Demande refusée.'}</b>
+      ${p.staff_note ? `<div class="post-body"><b>Note de l’équipe :</b> ${renderContent(p.staff_note)}</div>` : ''}
+      ${p.status === 'refused' && isRequester ? '<p class="small">Vous pouvez la corriger puis la renvoyer.</p>' : ''}
+    </div>` : '';
+  const staff = isStaff() ? `
+    <div class="mod-bar card">
+      <span class="small"><b>Équipe :</b></span>
+      ${isRequest ? `<button class="btn btn-small" id="publish">✓ Valider et publier</button>
+        ${p.status === 'pending' ? '<button class="btn btn-small btn-ghost" id="refuse">✗ Refuser</button>' : ''}` : ''}
+      <a class="btn btn-small btn-ghost" href="#/predefini/${p.id}/modifier">Modifier</a>
+      ${['reserved', 'taken'].includes(p.status) ? '<button class="btn btn-small btn-ghost" id="release">Libérer (de nouveau disponible)</button>' : ''}
+      <button class="btn btn-small danger" id="del-predef">Supprimer</button>
+    </div>` : '';
+  return `<nav class="crumbs"><a href="#/predefinis">Prédéfinis</a> › <span>${esc(p.name)}</span></nav>
+    ${staff}${requestBox}
+    <article class="card fiche ${facClass(p.faction)}">
+      <div class="profile-head">
+        ${charAvatar(p, 'xl')}
+        <div>
+          <h1>${esc(p.name)}</h1>
+          ${p.quote ? `<p class="author-title">« ${esc(p.quote)} »</p>` : ''}
+          <p>${factionBadge(p.faction)} ${predefBadge(p.status)}</p>
+          ${p.requester ? `<p class="small muted">Proposé par ${userLink(p.requester)}${p.linked ? `, lié à <a href="#/perso/${p.linked.id}">${esc(p.linked.name)}</a>` : ''}</p>` : ''}
+        </div>
+        <div class="profile-actions">${action}</div>
+      </div>
+      <dl class="fiche-id">
+        <div><dt>Âge</dt><dd>${p.age != null ? p.age + ' ans' : 'Au choix'}</dd></div>
+        <div><dt>Occupation</dt><dd>${esc(p.occupation || 'Au choix')}</dd></div>
+        <div><dt>Faction</dt><dd>${esc(p.faction)}</dd></div>
+      </dl>
+      ${p.summary ? `<p class="welcome-lead">${esc(p.summary)}</p>` : ''}
+      ${section('Le personnage', p.description)}
+      ${section(p.requester ? 'Ce que le demandeur attend du joueur' : 'Ce que l’équipe attend du joueur', p.expectations)}
+      ${PUBLISHED.includes(p.status) ? '<p class="small muted">En le choisissant, une fiche pré-remplie est créée à votre nom. Vous la complétez à votre façon, puis l’envoyez en validation comme une fiche normale.</p>' : ''}
+    </article>`;
+}
+viewPredef.after = (root, [idStr]) => {
+  const id = Number(idStr);
+  const upd = async (row, msg) => {
+    try { await q(sb.from('predefined_characters').update({ ...row, updated_at: new Date().toISOString() }).eq('id', id)); if (msg) toast(msg, 'ok'); router(); } catch (err) { fail(err); }
+  };
+  root.querySelector('#claim')?.addEventListener('click', async () => {
+    if (!confirm('Réserver ce personnage ? Une fiche pré-remplie sera créée à votre nom.')) return;
+    try {
+      const cid = await q(sb.rpc('claim_predefined', { p_id: id }));
+      toast('Personnage réservé ! Complétez sa fiche puis envoyez-la en validation.', 'ok');
+      go(`#/fiche/${cid}/modifier`);
+    } catch (err) { fail(err); }
+  });
+  root.querySelector('#publish')?.addEventListener('click', () => {
+    if (confirm('Publier ce prédéfini ? Il deviendra disponible pour tous les membres.')) upd({ status: 'open' }, 'Prédéfini publié.');
+  });
+  root.querySelector('#refuse')?.addEventListener('click', () => {
+    const m = modal('Refuser la demande', `<form><label>Note pour le membre (ce qu’il faut changer)<textarea name="note" rows="4" required minlength="3" maxlength="2000"></textarea></label>
+      <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Annuler</button><button class="btn" type="submit">Refuser</button></div></form>`);
+    m.querySelector('form').onsubmit = (ev) => { ev.preventDefault(); m.remove(); upd({ status: 'refused', staff_note: ev.target.note.value.trim() }, 'Demande refusée, le membre verra votre note.'); };
+  });
+  root.querySelector('#release')?.addEventListener('click', () => {
+    if (confirm('Rendre ce prédéfini de nouveau disponible ? La fiche du joueur, si elle existe, n’est pas supprimée.')) upd({ status: 'open', reserved_by: null, character_id: null });
+  });
+  const del = async (question, msg) => {
+    if (!confirm(question)) return;
+    try { await q(sb.from('predefined_characters').delete().eq('id', id)); toast(msg, 'ok'); go('#/predefinis'); } catch (err) { fail(err); }
+  };
+  root.querySelector('#del-predef')?.addEventListener('click', () => del('Supprimer ce prédéfini ? (Une fiche de joueur déjà créée n’est pas supprimée.)', 'Prédéfini supprimé.'));
+  root.querySelector('#withdraw')?.addEventListener('click', () => del('Retirer votre demande ?', 'Demande retirée.'));
+};
+
+async function viewPredefForm([idStr]) {
+  const need = requireLogin(); if (need) return need;
+  const isRequest = location.hash.startsWith('#/predefini/demande');
+  let p = { faction: 'Sans allégeance', position: 0 };
+  if (idStr) {
+    p = await q(sb.from('predefined_characters').select('*').eq('id', Number(idStr)).maybeSingle());
+    if (!p) return `<div class="card empty"><h2>Prédéfini introuvable</h2></div>`;
+  }
+  const asMember = !isStaff();
+  if (asMember && !isRequest && !(idStr && p.requested_by === state.profile.id && ['pending', 'refused'].includes(p.status))) {
+    return `<div class="card empty"><h2>Réservé à l’équipe</h2><p><a href="#/predefini/demande">Faire une demande de prédéfini</a></p></div>`;
+  }
+  if (asMember && !canWrite()) return `<div class="card empty"><h2>Votre compte ne peut pas faire de demande.</h2></div>`;
+  const requestMode = asMember || isRequest || (idStr && p.requested_by);
+  const mine = requestMode ? (await q(sb.from('characters').select('id,name').eq('owner_id', p.requested_by || state.profile.id).neq('status', 'archived').order('name'))) : [];
+  setTitle(idStr ? `Modifier ${p.name}` : requestMode ? 'Demande de prédéfini' : 'Nouveau prédéfini');
+  const groups = [...new Set(FACTION_LIST.map((f) => f.group))];
+  const factionOpts = groups.map((g) => `<optgroup label="${esc(g)}">${FACTION_LIST.filter((f) => f.group === g).map((f) => `<option value="${esc(f.value)}" ${f.value === p.faction ? 'selected' : ''}>${f.icon} ${esc(f.value)}</option>`).join('')}</optgroup>`).join('');
+  const area = (name, label, max, rows, ph) => `<label>${label}</label>
+    <div class="editor">${editorToolbar}<textarea name="${name}" rows="${rows}" maxlength="${max}" placeholder="${esc(ph)}">${esc(p[name] || '')}</textarea><div class="preview post-body" hidden></div></div>`;
+  const title = idStr ? `Modifier « ${esc(p.name)} »` : requestMode ? 'Demande de personnage prédéfini' : 'Nouveau personnage prédéfini';
+  return `<nav class="crumbs"><a href="#/predefinis">Prédéfinis</a> › <span>${idStr ? 'Modifier' : requestMode ? 'Demande' : 'Nouveau'}</span></nav>
+    <form class="card form" id="predef-form">
+      <h1>${title}</h1>
+      ${requestMode && asMember ? `<p class="muted">Décrivez le personnage que vous aimeriez voir joué par un autre membre (un proche, un rival, un mentor de votre personnage…). L’équipe relit la demande, puis la publie dans les prédéfinis avec votre nom.${p.status === 'refused' ? ' <b>En l’enregistrant, elle repart en validation.</b>' : ''}</p>` : ''}
+      ${p.staff_note && asMember ? `<div class="notice notice-bad"><b>Note de l’équipe :</b> ${renderContent(p.staff_note)}</div>` : ''}
+      <div class="form-grid">
+        <label>Nom<input name="name" required minlength="2" maxlength="60" value="${esc(p.name || '')}"></label>
+        <label>Âge <span class="muted">(vide = au choix)</span><input name="age" type="number" min="0" max="1000" value="${p.age ?? ''}"></label>
+        <label>Faction<select name="faction">${factionOpts}</select></label>
+        <label>Occupation<input name="occupation" maxlength="80" value="${esc(p.occupation || '')}"></label>
+      </div>
+      ${requestMode ? `<label>Lié à mon personnage <span class="muted">(facultatif)</span><select name="linked"><option value="">— Aucun —</option>${mine.map((c) => `<option value="${c.id}" ${c.id === p.linked_character_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : ''}
+      <label>Image <span class="muted">(facultatif, le joueur pourra la changer)</span></label>${imagePicker(p.avatar_url, p.name)}
+      <label>Citation<input name="quote" maxlength="200" value="${esc(p.quote || '')}"></label>
+      <label>Accroche (affichée dans la liste)<input name="summary" maxlength="400" value="${esc(p.summary || '')}" placeholder="Une ou deux phrases pour donner envie"></label>
+      ${area('description', 'Le personnage (histoire, caractère, liens avec les autres…)', 20000, 10, 'Ce texte sera copié dans la fiche du joueur, qui pourra le compléter.')}
+      ${area('expectations', requestMode ? 'Ce que vous attendez du joueur' : 'Ce que l’équipe attend du joueur', 6000, 4, 'Ex. : présence régulière, garder tel secret, lien obligatoire avec…')}
+      ${asMember ? '' : `<label>Ordre d’affichage<input name="position" type="number" value="${p.position ?? 0}" class="num"></label>`}
+      <div class="form-actions"><a class="btn btn-ghost" href="${idStr ? '#/predefini/' + p.id : '#/predefinis'}">Annuler</a><button class="btn">${asMember ? 'Envoyer à l’équipe' : 'Enregistrer'}</button></div>
+    </form>`;
+}
+viewPredefForm.after = (root, [idStr]) => {
+  wireEditor(root);
+  wireImagePicker(root, 'predefini');
+  const f = root.querySelector('#predef-form');
+  f?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const v = (n) => f[n].value.trim() || null;
+    const asMember = !isStaff();
+    try {
+      const row = { name: f.name.value.trim(), age: f.age.value === '' ? null : Number(f.age.value), faction: f.faction.value, occupation: v('occupation'), quote: v('quote'), summary: v('summary'), description: v('description'), expectations: v('expectations'), avatar_url: await validImageOrNull(f), updated_at: new Date().toISOString() };
+      if (f.position) row.position = Number(f.position.value) || 0;
+      if (f.linked) row.linked_character_id = f.linked.value ? Number(f.linked.value) : null;
+      if (asMember) row.status = 'pending';
+      let saved;
+      if (idStr) saved = await q(sb.from('predefined_characters').update(row).eq('id', Number(idStr)).select('id').single());
+      else {
+        const extra = asMember || location.hash.startsWith('#/predefini/demande') ? { requested_by: state.profile.id, status: asMember ? 'pending' : 'open' } : {};
+        saved = await q(sb.from('predefined_characters').insert({ ...row, created_by: state.profile.id, ...extra }).select('id').single());
+      }
+      toast(asMember ? 'Demande envoyée ! L’équipe va la relire.' : 'Prédéfini enregistré.', 'ok');
+      go(`#/predefini/${saved.id}`);
     } catch (err) { fail(err); }
   });
 };
