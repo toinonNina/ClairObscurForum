@@ -445,3 +445,64 @@ button.link:hover { text-decoration: underline; }
 .theme-toggle { background: none; border: 1px solid var(--line); color: var(--gold-2); border-radius: 99px; width: 34px; height: 34px; cursor: pointer; font-size: 1rem; display: inline-grid; place-items: center; transition: transform .3s, border-color .2s; }
 .theme-toggle:hover { border-color: var(--gold); transform: rotate(-20deg); }
 html.theme-anim, html.theme-anim * { transition: background-color .35s, color .35s, border-color .35s !important; }
+
+/* =====================================================================
+   Factions de Paris après la Fracture — couleurs et blasons
+   ===================================================================== */
+.fac { --fac: #8a8190; --fac-text: #cfc7d6; }
+.fac-peintres    { --fac: #c2452d; --fac-text: #f2a690; }   /* vermillon */
+.fac-ecrivains   { --fac: #4a63b5; --fac-text: #aebdf2; }   /* encre indigo */
+.fac-musiciens   { --fac: #b08a3e; --fac-text: #e6c98a; }   /* or */
+.fac-healers     { --fac: #d9c27a; --fac-text: #f4e7b6; }   /* or pâle, sacré */
+.fac-dreamers    { --fac: #8a6cc4; --fac-text: #cbb8f2; }   /* violet lunaire */
+.fac-discordants { --fac: #d9662a; --fac-text: #f6b184; }   /* braise */
+.fac-neutre      { --fac: #7d7684; --fac-text: #c3bcc9; }
+:root[data-theme='light'] .fac-peintres    { --fac-text: #9a2f1a; }
+:root[data-theme='light'] .fac-ecrivains   { --fac-text: #2d438c; }
+:root[data-theme='light'] .fac-musiciens   { --fac-text: #7a5a18; }
+:root[data-theme='light'] .fac-healers     { --fac: #c4a443; --fac-text: #7a6210; }
+:root[data-theme='light'] .fac-dreamers    { --fac-text: #5a3d96; }
+:root[data-theme='light'] .fac-discordants { --fac-text: #a2440f; }
+:root[data-theme='light'] .fac-neutre      { --fac-text: #5d5663; }
+
+.badge-faction.fac { color: var(--fac-text); border-color: var(--fac); background: color-mix(in srgb, var(--fac) 16%, transparent); text-transform: none; letter-spacing: .02em; font-size: .72rem; }
+.char-card.fac { border-top: 3px solid var(--fac); }
+.char-card.fac .avatar { border-color: var(--fac); }
+.fiche.fac { border-top: 4px solid var(--fac); }
+.fiche.fac .avatar { border-color: var(--fac); box-shadow: 0 0 22px color-mix(in srgb, var(--fac) 45%, transparent); }
+.fiche.fac .fiche-section h3, .fiche.fac .fiche-section h3::before { color: var(--fac-text); }
+.post-rp.fac .post-author { box-shadow: inset 3px 0 0 var(--fac); background: linear-gradient(180deg, color-mix(in srgb, var(--fac) 14%, transparent), var(--sunk)); }
+.post-rp.fac .post-author .avatar { border-color: var(--fac); }
+.post-rp.fac .char-link { color: var(--fac-text); }
+.cat-row.fac { box-shadow: inset 3px 0 0 var(--fac); }
+.cat-row.fac .cat-icon { border-color: var(--fac); box-shadow: 0 0 14px color-mix(in srgb, var(--fac) 35%, transparent); }
+
+/* Panneau « Forces en présence » */
+.fac-panel { display: flex; flex-direction: column; gap: .55rem; margin-bottom: .6rem; }
+.fac-line { display: grid; grid-template-columns: 1fr auto; gap: .15rem .6rem; color: var(--text); font-size: .95rem; }
+.fac-line:hover { text-decoration: none; color: var(--fac-text); }
+.fac-line b { color: var(--fac-text); font-family: var(--sans); font-size: .85rem; }
+.fac-bar { grid-column: 1 / -1; height: 4px; border-radius: 4px; background: var(--sunk); overflow: hidden; }
+.fac-bar span { display: block; height: 100%; min-width: 3px; background: var(--fac); border-radius: 4px; }
+
+/* Bannière : pluie de lettres */
+.hero-kicker { font: 600 .78rem var(--sans); letter-spacing: .28em; text-transform: uppercase; color: var(--gold-2); margin: 0; }
+.hero-canvas::before {
+  content: 'A  ê  §  r  ¶  m  é  —  L  «  o  ç  N  »  t  ù  Ω  e';
+  position: absolute; inset: -20% 0 0 45%; padding: 1rem;
+  font: italic 1.6rem var(--serif); line-height: 2.6; letter-spacing: 1.6rem; word-spacing: .6rem;
+  color: rgba(230, 201, 138, .22); transform: rotate(8deg);
+  animation: letters 22s linear infinite; pointer-events: none;
+}
+:root[data-theme='light'] .hero-canvas::before { color: rgba(74, 99, 181, .22); }
+@keyframes letters { from { transform: rotate(8deg) translateY(-8%); } to { transform: rotate(8deg) translateY(8%); } }
+@media (prefers-reduced-motion: reduce) { .hero-canvas::before { animation: none; } }
+
+/* Tableaux dans les pages d'univers */
+.post-body table { border-collapse: collapse; width: 100%; margin: .8rem 0; }
+.post-body th, .post-body td { border: 1px solid var(--line); padding: .45rem .7rem; text-align: left; }
+.post-body th { font: 600 .78rem var(--sans); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); background: var(--sunk); }
+.post-body h2 { border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
+.post-body h4 { font-family: var(--display); color: var(--gold-2); margin-bottom: .2rem; }
+.post-body hr { border: 0; height: 14px; background: radial-gradient(circle, var(--gold) 0 3px, transparent 4px) center / 14px 14px no-repeat, linear-gradient(90deg, transparent, var(--gold), transparent) center / 100% 1px no-repeat; opacity: .7; margin: 1.6rem 0; }
+.layout .prose { max-width: none; margin: 0 0 1.2rem; }
