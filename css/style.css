@@ -77,19 +77,26 @@ mark { background: rgba(201, 164, 92, .35); color: inherit; border-radius: 3px; 
 
 /* ---------- Pétales qui tombent (pure CSS) ---------- */
 .petals { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; }
-.petals::before, .petals::after {
-  content: ''; position: absolute; top: -10%; width: 14px; height: 10px;
-  background: radial-gradient(ellipse at 30% 30%, #f3c1b8, var(--petal) 60%, transparent 70%);
-  border-radius: 80% 0 80% 0; opacity: .55;
-  animation: fall 18s linear infinite;
-  box-shadow: 30vw 10vh 0 -2px rgba(217, 138, 138, .6), 60vw -20vh 0 -1px rgba(217, 138, 138, .5), 85vw 5vh 0 -3px rgba(230, 201, 138, .5);
+.petal {
+  position: absolute; top: -40px; left: var(--x);
+  width: var(--s); height: calc(var(--s) * .72);
+  background: radial-gradient(ellipse at 30% 30%, var(--petal-light), var(--petal-red) 55%, var(--petal-dark) 100%);
+  border-radius: 80% 0 80% 0;
+  opacity: var(--o);
+  will-change: transform;
+  animation: petal-fall var(--d) linear var(--delay) infinite;
 }
-.petals::before { left: 8%; }
-.petals::after { left: 3%; animation-duration: 26s; animation-delay: -9s; transform: scale(.7); }
-@keyframes fall {
-  0% { transform: translate(0, -10vh) rotate(0); }
-  50% { transform: translate(6vw, 55vh) rotate(200deg); }
-  100% { transform: translate(-3vw, 120vh) rotate(420deg); }
+.petal::after { /* nervure */
+  content: ''; position: absolute; inset: 45% 15% auto 15%; height: 1px; background: rgba(255, 255, 255, .25); transform: rotate(35deg);
+}
+:root { --petal-light: #ff8f8f; --petal-red: #c8102e; --petal-dark: #7d0a1c; }
+:root[data-theme='light'] { --petal-light: #ff7a7a; --petal-red: #d0142f; --petal-dark: #8f0b20; }
+@keyframes petal-fall {
+  0%   { transform: translate3d(0, -5vh, 0) rotate(0deg) rotateX(0deg); }
+  25%  { transform: translate3d(var(--sway), 25vh, 0) rotate(90deg) rotateX(60deg); }
+  50%  { transform: translate3d(calc(var(--sway) * -.6), 55vh, 0) rotate(200deg) rotateX(0deg); }
+  75%  { transform: translate3d(var(--sway), 82vh, 0) rotate(290deg) rotateX(60deg); }
+  100% { transform: translate3d(calc(var(--sway) * -.3), 110vh, 0) rotate(380deg) rotateX(0deg); }
 }
 @media (prefers-reduced-motion: reduce) { .petals { display: none; } }
 
