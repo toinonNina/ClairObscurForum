@@ -276,9 +276,8 @@ async function loadProfile() {
 }
 
 function renderNav() {
-  if (!configured) { nav.innerHTML = ''; return; }
   const p = state.profile;
-  let html = `<a href="#/">Accueil</a><a href="#/univers">Univers</a><a href="#/personnages">Personnages</a><a href="#/membres">Membres</a>`;
+  let html = configured ? `<a href="#/">Accueil</a><a href="#/univers">Univers</a><a href="#/personnages">Personnages</a><a href="#/membres">Membres</a>` : '';
   if (p) {
     if (isStaff()) html += `<a href="#/moderation" class="nav-mod">Modération<span id="report-count"></span></a>`;
     html += `<a href="#/u/${encodeURIComponent(p.username)}" class="nav-user">${avatar(p, 'xs')}<span>${esc(p.username)}</span></a>
@@ -289,7 +288,17 @@ function renderNav() {
   } else {
     html += `<a href="#/connexion">Connexion</a><a href="#/inscription" class="btn btn-small">Rejoindre</a>`;
   }
+  const light = document.documentElement.dataset.theme === 'light';
+  html += `<button class="theme-toggle" id="theme-toggle" title="${light ? 'Passer au thème sombre' : 'Passer au thème clair'}" aria-label="${light ? 'Passer au thème sombre' : 'Passer au thème clair'}">${light ? '☾' : '☀'}</button>`;
   nav.innerHTML = html;
+  nav.querySelector('#theme-toggle').addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.classList.add('theme-anim');
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('theme', next); } catch (e) { /* navigation privée */ }
+    setTimeout(() => document.documentElement.classList.remove('theme-anim'), 400);
+    renderNav();
+  });
   nav.querySelector('#logout')?.addEventListener('click', async () => { await sb.auth.signOut(); toast('À bientôt, expéditionnaire.'); go('#/'); });
   if (isStaff()) {
     sb.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'open').then(({ count }) => {
