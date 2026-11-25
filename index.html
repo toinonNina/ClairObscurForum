@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Les Chroniques de Lumière — Forum RPG Clair Obscur</title>
+  <meta name="description" content="Forum de jeu de rôle par écrit dans l’univers de Clair Obscur : Expedition 33.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%2314121a' stroke='%23c9a45c' stroke-width='3'/%3E%3Ctext x='32' y='42' font-family='Georgia' font-size='28' text-anchor='middle' fill='%23c9a45c'%3E33%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+</head>
+<body>
+  <div class="petals" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a href="#/" class="brand">
+        <span class="brand-seal" aria-hidden="true">33</span>
+        <span class="brand-text">
+          <span class="brand-name" id="brand-name">Les Chroniques de Lumière</span>
+          <span class="brand-tag" id="brand-tag">Forum RPG</span>
+        </span>
+      </a>
+      <form class="header-search" id="header-search" role="search">
+        <input type="search" name="q" placeholder="Rechercher…" aria-label="Rechercher dans le forum">
+      </form>
+      <nav class="nav" id="nav" aria-label="Navigation principale"></nav>
+    </div>
+    <div class="ornament" aria-hidden="true"></div>
+  </header>
+
+  <main class="wrap" id="app" tabindex="-1">
+    <p class="loading">Chargement…</p>
+  </main>
+
+  <footer class="site-footer wrap">
+    <div class="ornament small" aria-hidden="true"></div>
+    <p>Forum de fans non officiel. <em>Clair Obscur : Expedition 33</em> est une œuvre de Sandfall Interactive ; ce site n'y est pas affilié.</p>
+    <p class="muted">« Que chaque coup de pinceau compte. »</p>
+  </footer>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
