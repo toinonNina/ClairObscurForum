@@ -720,3 +720,16 @@ html.theme-anim, html.theme-anim * { transition: background-color .35s, color .3
 .crop-controls { display: flex; flex-direction: column; align-items: center; gap: .2rem; max-width: 220px; text-align: center; }
 .zoom-label { display: flex; align-items: center; gap: .4rem; margin: 0; width: 100%; }
 .zoom-label input[type=range] { margin: 0; padding: 0; accent-color: var(--gold); background: none; border: 0; }
+
+/* ---------- Personnages prédéfinis ---------- */
+.predef-card { position: relative; }
+.predef-card .predef-summary { color: var(--text); opacity: .85; line-height: 1.4; }
+.predef-card.predef-taken, .predef-card.predef-refused { opacity: .62; }
+.predef-card.predef-taken:hover, .predef-card.predef-refused:hover { opacity: 1; }
+.predef-card.predef-open { box-shadow: 0 0 0 1px var(--ok) inset; }
+.predef-card.predef-pending { border-style: dashed; }
+.notice { padding: .8rem 1rem; margin-bottom: 1rem; border-left: 4px solid var(--gold); }
+.notice.notice-bad { border-left-color: var(--crimson); }
+.notice .post-body { margin-top: .4rem; }
+.page-head > span { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.notice .post-body > p, .notice .post-body p { margin: .25rem 0; }
