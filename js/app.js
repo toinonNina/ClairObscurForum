@@ -44,7 +44,7 @@ const CHAR_COLS = 'id,name,age,faction,occupation,avatar_url,quote,status,owner_
   let html = '';
   for (let i = 0; i < count; i++) {
     const d = r(11, 24);
-    html += `<span class="petal" style="--x:${r(0, 100).toFixed(1)}vw;--s:${r(9, 20).toFixed(0)}px;--o:${r(.45, .9).toFixed(2)};--d:${d.toFixed(1)}s;--delay:${(-r(0, d)).toFixed(1)}s;--sway:${r(-12, 12).toFixed(1)}vw"></span>`;
+    html += `<span class="petal" style="--x:${r(0, 100).toFixed(1)}vw;--s:${r(12, 24).toFixed(0)}px;--o:${r(.65, .95).toFixed(2)};--d:${d.toFixed(1)}s;--delay:${(-r(0, d)).toFixed(1)}s;--sway:${r(-12, 12).toFixed(1)}vw"></span>`;
   }
   box.innerHTML = html;
 })();
