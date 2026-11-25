@@ -13,7 +13,7 @@
   --gold: #c9a45c;
   --gold-2: #e6c98a;
   --crimson: #9b2f42;
-  --petal: hsl(0, 76%, 43%);
+  --petal: #8a0f0f;
   --sea: #4f7487;
   --ok: #5f9a6e;
   --radius: 10px;
@@ -669,3 +669,42 @@ html.theme-anim, html.theme-anim * { transition: background-color .35s, color .3
 .pm.mine .pm-bubble { background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 14%, transparent), color-mix(in srgb, var(--gold) 6%, transparent)), var(--card-bg); }
 .pm-bubble header { margin-bottom: .3rem; font-family: var(--sans); }
 .nav-mail { white-space: nowrap; }
+
+/* =====================================================================
+   Bannière illustrée (img/banniere.webp) — remplace la bannière peinte en CSS
+   ===================================================================== */
+.banner { height: clamp(220px, 27vw, 380px); place-items: end start; border-bottom: 1px solid var(--gold); }
+.banner-art,
+:root[data-theme='light'] .banner-art {
+  background: url('../img/banniere.jpg') center 38% / cover no-repeat;
+  background-image: image-set(url('../img/banniere.webp') type('image/webp'), url('../img/banniere.jpg') type('image/jpeg'));
+}
+.banner-art::before, .banner-art::after { display: none; }
+/* voile sombre en bas pour la lisibilité du titre (identique dans les deux thèmes : l'image est sombre) */
+.banner::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(0deg, rgba(10, 8, 14, .85) 0%, rgba(10, 8, 14, .45) 28%, transparent 55%),
+    linear-gradient(90deg, rgba(10, 8, 14, .55) 0%, transparent 35%);
+}
+.banner .brand { z-index: 1; flex-direction: row; text-align: left; gap: .9rem; margin: 0 0 1.1rem max(1rem, calc((100vw - 1180px) / 2)); }
+.banner .brand-text { align-items: flex-start; }
+.banner .brand-name,
+:root[data-theme='light'] .banner .brand-name { color: #f6ecd6; font-size: clamp(1.5rem, 3vw, 2.4rem); text-shadow: 0 2px 4px rgba(0, 0, 0, .9), 0 0 24px rgba(0, 0, 0, .8); }
+.banner .brand-tag { color: #e6d8bd; opacity: 1; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); }
+.banner .brand-seal,
+:root[data-theme='light'] .banner .brand-seal { background: radial-gradient(circle at 35% 30%, #3a2f3f, #121019); color: var(--gold-2); border-color: #c9a45c; box-shadow: 0 0 0 4px rgba(201, 164, 92, .2), 0 4px 14px rgba(0, 0, 0, .7); }
+:root[data-theme='light'] .banner .brand-seal { color: #e6c98a; }
+.banner .brand:hover .brand-name { color: #fff; }
+@media (max-width: 700px) {
+  .banner { height: 190px; }
+  .banner-art, :root[data-theme='light'] .banner-art {
+    background-image: image-set(url('../img/banniere-mobile.webp') type('image/webp'), url('../img/banniere.jpg') type('image/jpeg'));
+    background-position: 48% 40%;
+  }
+  .banner .brand-seal { width: 44px; height: 44px; font-size: 1rem; }
+}
+/* grands écrans : bannière plus haute pour garder le visage et les cinq personnages */
+.banner { height: clamp(220px, 28vw, 480px); }
+.banner-art, :root[data-theme='light'] .banner-art { background-position: center 30%; }
+@media (max-width: 700px) { .banner { height: 190px; } }
