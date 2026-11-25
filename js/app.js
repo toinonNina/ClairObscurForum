@@ -44,11 +44,104 @@ const isAdmin = () => !!state.profile && !state.profile.banned && state.profile.
 const canWrite = () => !!state.profile && !state.profile.banned;
 const userLink = (p) => (p ? `<a class="user-link role-${esc(p.role || 'member')}" href="#/u/${encodeURIComponent(p.username)}">${esc(p.username)}</a>` : '<span class="muted">Membre supprimé</span>');
 
-function avatar(p, size = '') {
-  if (p?.avatar_url) return `<img class="avatar ${size}" src="${esc(p.avatar_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`;
-  const letter = (p?.username || '?').charAt(0).toUpperCase();
-  const hue = [...(p?.username || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+function initialAvatar(name, size = '') {
+  const letter = (name || '?').charAt(0).toUpperCase();
+  const hue = [...(name || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
   return `<span class="avatar avatar-initial ${size}" style="--h:${hue}">${esc(letter)}</span>`;
+}
+function avatar(p, size = '') {
+  if (p?.avatar_url) return `<img class="avatar ${size}" src="${esc(p.avatar_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-name="${esc(p.username || '?')}">`;
+  return initialAvatar(p?.username, size);
+}
+// Image cassée (lien mort, page web au lieu d’une image…) : on affiche l’initiale à la place
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || !img.classList.contains('avatar') || img.dataset.preview !== undefined) return;
+  const size = [...img.classList].find((c) => ['xs', 'sm', 'lg', 'xl'].includes(c)) || '';
+  img.outerHTML = initialAvatar(img.dataset.name, size);
+}, true);
+
+// ---- Images : envoi depuis l’ordinateur (Supabase Storage) ou lien direct ----
+const AVATAR_BUCKET = 'avatars';
+const MAX_IMAGE_MB = 2;
+function normalizeImageUrl(url) {
+  let u = (url || '').trim();
+  if (!u) return '';
+  if (u.startsWith('http://')) u = 'https://' + u.slice(7);
+  // Lien vers la page Imgur d’une image -> lien direct vers l’image
+  const m = u.match(/^https:\/\/(?:www\.)?imgur\.com\/([A-Za-z0-9]{5,10})$/);
+  if (m) u = `https://i.imgur.com/${m[1]}.png`;
+  return u;
+}
+function checkImage(url, timeout = 10000) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const t = setTimeout(() => resolve(false), timeout);
+    img.referrerPolicy = 'no-referrer';
+    img.onload = () => { clearTimeout(t); resolve(img.naturalWidth > 0); };
+    img.onerror = () => { clearTimeout(t); resolve(false); };
+    img.src = url;
+  });
+}
+const BAD_IMAGE = 'Ce lien ne mène pas directement à une image. Sur l’image, faites clic droit › « Copier l’adresse de l’image », ou utilisez le bouton « Envoyer une image ».';
+function imagePicker(current, name) {
+  return `<div class="image-picker">
+      <img class="avatar xl" data-preview src="${esc(current || '')}" alt="" ${current ? '' : 'hidden'} referrerpolicy="no-referrer">
+      <span class="avatar xl avatar-initial" data-preview-empty style="--h:30" ${current ? 'hidden' : ''}>${esc((name || '?').charAt(0).toUpperCase())}</span>
+      <div class="image-picker-fields">
+        <label class="btn btn-small btn-ghost file-btn">📁 Envoyer une image<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-upload hidden></label>
+        <span class="small muted">PNG, JPG, WEBP ou GIF, ${MAX_IMAGE_MB} Mo maximum.</span>
+        <label>… ou lien direct vers une image<input name="avatar_url" type="text" inputmode="url" value="${esc(current || '')}" placeholder="https://…/image.png"></label>
+        <button type="button" class="link small" data-clear-image>Retirer l’image</button>
+        <span class="small" data-image-status></span>
+      </div>
+    </div>`;
+}
+function wireImagePicker(root, kind) {
+  const box = root.querySelector('.image-picker');
+  if (!box) return;
+  const input = box.querySelector('input[name=avatar_url]');
+  const prev = box.querySelector('[data-preview]');
+  const empty = box.querySelector('[data-preview-empty]');
+  const status = box.querySelector('[data-image-status]');
+  const show = async (url) => {
+    status.textContent = '';
+    if (!url) { prev.hidden = true; empty.hidden = false; return; }
+    status.textContent = 'Vérification de l’image…';
+    const ok = await checkImage(url);
+    status.textContent = ok ? '✓ Image trouvée.' : BAD_IMAGE;
+    status.className = 'small ' + (ok ? 'ok-text' : 'danger');
+    if (ok) { prev.src = url; prev.hidden = false; empty.hidden = true; }
+  };
+  input.addEventListener('change', () => { input.value = normalizeImageUrl(input.value); show(input.value); });
+  box.querySelector('[data-clear-image]').addEventListener('click', () => { input.value = ''; show(''); });
+  box.querySelector('[data-upload]').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > MAX_IMAGE_MB * 1024 * 1024) return toast(`Image trop lourde (${MAX_IMAGE_MB} Mo maximum).`, 'error');
+    status.textContent = 'Envoi en cours…'; status.className = 'small';
+    try {
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+      const path = `${state.profile.id}/${kind}-${Date.now()}.${ext}`;
+      const { error } = await sb.storage.from(AVATAR_BUCKET).upload(path, file, { contentType: file.type, cacheControl: '31536000', upsert: false });
+      if (error) throw error;
+      input.value = sb.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
+      await show(input.value);
+      status.textContent = '✓ Image envoyée. Pensez à enregistrer.';
+    } catch (err) {
+      status.textContent = '';
+      toast(/bucket not found/i.test(err.message || '') ? 'Le stockage d’images n’est pas encore activé : lancez le script supabase/avatars.sql dans Supabase.' : errMsg(err), 'error');
+    }
+    e.target.value = '';
+  });
+}
+async function validImageOrNull(f) {
+  const url = normalizeImageUrl(f.avatar_url.value);
+  f.avatar_url.value = url;
+  if (!url) return null;
+  if (!url.startsWith('https://')) throw new Error('Le lien de l’image doit commencer par https://');
+  if (!(await checkImage(url))) throw new Error(BAD_IMAGE);
+  return url;
 }
 function roleBadge(p) {
   if (!p) return '';
@@ -803,10 +896,9 @@ function viewSettings() {
   return `
     <form class="card form" id="profile-form">
       <h1>Mon profil</h1>
-      <div class="profile-head">${avatar(p, 'xl')}<p class="small muted">Pour l’avatar, collez l’adresse (https://…) d’une image hébergée en ligne, par exemple sur Imgur ou Gravatar.</p></div>
+      <label>Avatar</label>${imagePicker(p.avatar_url, p.username)}
       <label>Pseudo<input name="username" value="${esc(p.username)}" required minlength="3" maxlength="24" pattern="[A-Za-z0-9_.\\-]+"></label>
       <label>Devise (affichée sous votre pseudo)<input name="title" value="${esc(p.title || '')}" maxlength="60" placeholder="Ex. : Parade parfaite ou rien"></label>
-      <label>Adresse de l’avatar<input name="avatar_url" type="url" value="${esc(p.avatar_url || '')}" placeholder="https://…"></label>
       <label>Présentation</label>${editor('bio', p.bio || '', 'Parlez de vous, de votre équipe préférée…').replace('required ', '').replace('maxlength="20000"', 'maxlength="2000"')}
       <div class="form-actions"><button class="btn">Enregistrer</button></div>
     </form>
@@ -818,11 +910,12 @@ function viewSettings() {
 }
 viewSettings.after = (root) => {
   wireEditor(root);
+  wireImagePicker(root, 'avatar');
   root.querySelector('#profile-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
-      const row = { username: f.username.value.trim(), title: f.title.value.trim() || null, avatar_url: f.avatar_url.value.trim() || null, bio: f.bio.value.trim() || null };
+      const row = { username: f.username.value.trim(), title: f.title.value.trim() || null, avatar_url: await validImageOrNull(f), bio: f.bio.value.trim() || null };
       state.profile = await q(sb.from('profiles').update(row).eq('id', state.profile.id).select().single());
       toast('Profil enregistré.', 'ok');
       go(`#/u/${encodeURIComponent(state.profile.username)}`);
@@ -1118,7 +1211,7 @@ async function viewCharacterForm([idStr]) {
         <label>Origine / camp<select name="faction">${factionOpts}</select></label>
         <label>Occupation<input name="occupation" maxlength="80" value="${esc(c.occupation || '')}" placeholder="Ex. : forgeronne, cartographe…"></label>
       </div>
-      <label>Image du personnage (adresse https://…)<input name="avatar_url" type="url" value="${esc(c.avatar_url || '')}" placeholder="Une illustration dont vous avez les droits, ou une création à vous"></label>
+      <label>Image du personnage <span class="muted">(une illustration dont vous avez les droits, ou une création à vous)</span></label>${imagePicker(c.avatar_url, c.name)}
       <label>Citation<input name="quote" maxlength="200" value="${esc(c.quote || '')}" placeholder="Une phrase qui le résume"></label>
       ${area('appearance', 'Apparence', 6000, 5, 'Taille, visage, tenue, signes distinctifs…')}
       ${area('personality', 'Caractère', 6000, 5, 'Qualités, défauts, peurs, ce qui le fait avancer…')}
@@ -1133,6 +1226,7 @@ async function viewCharacterForm([idStr]) {
 }
 viewCharacterForm.after = (root, [idStr]) => {
   wireEditor(root);
+  wireImagePicker(root, 'perso');
   const f = root.querySelector('#char-form');
   if (!f) return;
   let mode = 'save';
@@ -1140,9 +1234,10 @@ viewCharacterForm.after = (root, [idStr]) => {
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const v = (n) => f[n].value.trim() || null;
-    const row = { name: f.name.value.trim(), age: f.age.value === '' ? null : Number(f.age.value), faction: f.faction.value, occupation: v('occupation'), avatar_url: v('avatar_url'), quote: v('quote'), appearance: v('appearance'), personality: v('personality'), history: v('history'), abilities: v('abilities') };
+    const row = { name: f.name.value.trim(), age: f.age.value === '' ? null : Number(f.age.value), faction: f.faction.value, occupation: v('occupation'), avatar_url: null, quote: v('quote'), appearance: v('appearance'), personality: v('personality'), history: v('history'), abilities: v('abilities') };
     if (mode === 'submit') row.status = 'pending';
     try {
+      row.avatar_url = await validImageOrNull(f);
       let saved;
       if (idStr) saved = await q(sb.from('characters').update(row).eq('id', Number(idStr)).select('id').single());
       else saved = await q(sb.from('characters').insert({ ...row, owner_id: state.profile.id, status: row.status || 'draft' }).select('id').single());
