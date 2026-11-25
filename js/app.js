@@ -413,91 +413,133 @@ function viewSetup() {
 
 async function viewHome() {
   setTitle('');
-  const [cats, latest, members, topics, posts, chars, newChars] = await Promise.all([
+  const since24 = new Date(Date.now() - 864e5).toISOString();
+  const [cats, recentTopics, members, topics, posts, chars, newChars, news, newest, online, facRes] = await Promise.all([
     q(sb.from('category_stats').select('*').order('position')),
-    q(sb.from('topics').select('id,title,post_count,last_post_at,category:categories(name,slug,icon,kind),last:profiles!topics_last_post_author_fkey(username,role)').order('last_post_at', { ascending: false }).limit(8)),
+    q(sb.from('topics').select('id,title,category_id,post_count,last_post_at,last:profiles!topics_last_post_author_fkey(username,role,avatar_url)').order('last_post_at', { ascending: false }).limit(300)),
     sb.from('profiles').select('id', { count: 'exact', head: true }),
     sb.from('topics').select('id', { count: 'exact', head: true }),
     sb.from('posts').select('id', { count: 'exact', head: true }),
     sb.from('characters').select('id', { count: 'exact', head: true }).eq('status', 'approved'),
-    q(sb.from('characters').select(CHAR_COLS).eq('status', 'approved').order('validated_at', { ascending: false }).limit(6)),
+    q(sb.from('characters').select(CHAR_COLS).eq('status', 'approved').order('validated_at', { ascending: false }).limit(5)),
+    q(sb.from('topics').select('id,title,created_at,category:categories!inner(slug)').eq('category.slug', 'annonces').order('created_at', { ascending: false }).limit(3)),
+    q(sb.from('profiles').select('username,role').order('created_at', { ascending: false }).limit(1)),
+    sb.from('profiles').select('username,role,last_seen').gte('last_seen', since24).order('last_seen', { ascending: false }).limit(200),
+    sb.from('characters').select('faction').eq('status', 'approved').limit(5000),
   ]);
-  const { data: facRows } = await sb.from('characters').select('faction').eq('status', 'approved').limit(5000);
+  const onlineList = online.error ? null : online.data; // null si la colonne last_seen n’existe pas encore
   const facCount = {};
-  (facRows || []).forEach((r) => { facCount[r.faction] = (facCount[r.faction] || 0) + 1; });
-  const facMax = Math.max(1, ...Object.values(facCount));
-  const facPanel = FACTION_LIST.filter((f) => f.key !== 'neutre' || facCount[f.value]).map((f) => `
-    <a class="fac-line ${facClass(f.value)}" href="#/personnages/${encodeURIComponent(f.value)}">
-      <span>${f.icon} ${esc(f.value.replace('Musiciens — ', ''))}</span><b>${facCount[f.value] || 0}</b>
-      <span class="fac-bar"><span style="width:${Math.round(((facCount[f.value] || 0) / facMax) * 100)}%"></span></span>
-    </a>`).join('');
-  const welcome = state.session ? '' : `
-    <section class="hero card">
-      <div class="hero-canvas" aria-hidden="true"></div>
-      <div class="hero-text">
-        <p class="hero-kicker">Après la Fracture</p>
-        <h1>Seul Paris a survécu.</h1>
-        <p>Peintres et Écrivains se disputent le monopole de la création du nouveau monde ; les Musiciens, neutres et divisés, font pencher la balance. Forum de <b>jeu de rôle par écrit</b> inspiré de <em>Clair Obscur : Expedition 33</em>.</p>
-        <p><a class="btn" href="#/inscription">Rejoindre le forum</a> <a class="btn btn-ghost" href="#/univers/contexte">Découvrir l’univers</a></p>
+  (facRes.data || []).forEach((r) => { facCount[r.faction] = (facCount[r.faction] || 0) + 1; });
+
+  // Dernier sujet actif de chaque catégorie
+  const lastByCat = {};
+  recentTopics.forEach((t) => { if (!lastByCat[t.category_id]) lastByCat[t.category_id] = t; });
+  const lastPostPage = (t) => `#/t/${t.id}/fin`;
+
+  const forumRow = (c) => {
+    const last = lastByCat[c.id];
+    const fk = TERRITORY_FAC[c.slug];
+    return `
+    <div class="forum-row ${fk ? 'fac fac-' + fk : ''}">
+      <a class="forum-icon" href="#/c/${esc(c.slug)}" aria-hidden="true" tabindex="-1">${esc(c.icon || '✦')}</a>
+      <div class="forum-main">
+        <a class="forum-title" href="#/c/${esc(c.slug)}">${esc(c.name)}</a>
+        <p class="forum-desc">${esc(c.description || '')}</p>
+        <span class="forum-counts">${plural(c.topic_count, 'sujet', 'sujets')} · ${plural(c.message_count, 'message', 'messages')}</span>
       </div>
-    </section>`;
-  const row = (c) => `
-    <a class="cat-row ${TERRITORY_FAC[c.slug] ? 'fac fac-' + TERRITORY_FAC[c.slug] : ''}" href="#/c/${esc(c.slug)}">
-      <span class="cat-icon">${esc(c.icon || '✦')}</span>
-      <span class="cat-main"><span class="cat-name">${esc(c.name)}</span><span class="cat-desc">${esc(c.description || '')}</span></span>
-      <span class="cat-stat"><b>${c.topic_count}</b> sujets</span>
-      <span class="cat-stat"><b>${c.message_count}</b> messages</span>
-      <span class="cat-last">${c.last_activity ? ago(c.last_activity) : '<span class="muted">Aucun message</span>'}</span>
-    </a>`;
-  const group = (kind, title, hint) => {
-    const list = cats.filter((c) => c.kind === kind);
-    return list.length ? `<h2 class="section-title">${title}<span class="hint">${hint}</span></h2><div class="card cat-list ${kind}">${list.map(row).join('')}</div>` : '';
+      <div class="forum-last">${last ? `
+        ${avatar(last.last, 'sm')}
+        <div><a href="${lastPostPage(last)}" class="forum-last-title">${esc(last.title)}</a>
+        <span class="small muted">par ${userLink(last.last)} · ${ago(last.last_post_at)}</span></div>` : '<span class="muted small">Aucun message pour l’instant</span>'}
+      </div>
+    </div>`;
   };
-  const latestRows = latest.map((t) => `
-    <li><a href="#/t/${t.id}/fin">${t.category?.kind === 'rp' ? '<span class="tag tag-rp">RP</span>' : ''}${esc(t.title)}</a>
-      <span class="muted small">${esc(t.category?.icon || '')} ${esc(t.category?.name || '')} · ${t.last ? 'par ' + esc(t.last.username) + ' · ' : ''}${ago(t.last_post_at)}</span></li>`).join('');
-  const charRows = newChars.map((c) => `<a class="mini-char" href="#/perso/${c.id}" title="${esc(c.name)}">${charAvatar(c, 'sm')}<span>${esc(c.name)}</span></a>`).join('');
-  return `${welcome}
-    <div class="layout">
-      <section>
-        ${group('rp', 'Paris', 'En jeu : on écrit en incarnant son personnage')}
-        ${group('hrp', 'Hors-jeu', 'On parle en tant que joueur')}
-        ${cats.length ? '' : '<div class="card empty">Aucune catégorie. Lancez le script SQL.</div>'}
-      </section>
-      <aside>
-        <div class="card side">
-          <h3>Commencer</h3>
-          <ul class="latest">
-            <li><a href="#/univers/bienvenue">Bienvenue &amp; comment jouer</a></li>
-            <li><a href="#/univers/contexte">La Fracture</a></li>
-            <li><a href="#/univers/factions">Les factions</a></li>
-            <li><a href="#/univers/lieux">Paris aujourd’hui</a></li>
-            <li><a href="#/univers/reglement-rp">Règlement RP</a></li>
-            <li><a href="#/fiche/nouvelle">Créer mon personnage</a></li>
+  const wikiRow = (href, icon, title, desc) => `
+    <div class="forum-row"><a class="forum-icon" href="${href}" aria-hidden="true" tabindex="-1">${icon}</a>
+      <div class="forum-main"><a class="forum-title" href="${href}">${title}</a><p class="forum-desc">${desc}</p></div>
+      <div class="forum-last"><a class="btn btn-small btn-ghost" href="${href}">Lire</a></div></div>`;
+  const group = (title, kicker, rows) => rows ? `
+    <section class="forum-group">
+      <div class="group-head"><span class="group-kicker">${kicker}</span><h2>${title}</h2></div>
+      <div class="card forum-list">${rows}</div>
+    </section>` : '';
+
+  const rp = cats.filter((c) => c.kind === 'rp');
+  const hrpStart = cats.filter((c) => c.kind !== 'rp' && c.position < 5);
+  const hrpEnd = cats.filter((c) => c.kind !== 'rp' && c.position >= 5);
+
+  const factionLegend = FACTION_LIST.filter((f) => f.key !== 'neutre').map((f) =>
+    `<a class="legend-item ${facClass(f.value)}" href="#/personnages/${encodeURIComponent(f.value)}"><span class="legend-dot"></span>${f.icon} ${esc(f.value.replace('Musiciens — ', ''))} <b>${facCount[f.value] || 0}</b></a>`).join('');
+
+  const intro = `
+    <section class="welcome card">
+      <div class="welcome-head">
+        <span class="group-kicker">Après la Fracture</span>
+        <h1>Bienvenue à Paris</h1>
+        <p class="welcome-lead">La Fracture a fini par venir dans le monde réel, et <b>seule la ville de Paris a survécu</b>. Peintres et Écrivains s’y disputent le monopole de la création du nouveau monde ; les Musiciens, neutres et divisés, font pencher la balance.</p>
+        ${state.session ? '' : '<p><a class="btn" href="#/inscription">Rejoindre le forum</a> <a class="btn btn-ghost" href="#/connexion">Connexion</a></p>'}
+      </div>
+      <div class="welcome-cols">
+        <div class="welcome-col">
+          <h3>Les factions</h3>
+          <div class="faction-cards">
+            <a class="faction-card fac fac-peintres" href="#/univers/factions"><span>🎨</span><b>Les Peintres</b><em>« L’image précède le mot. »</em></a>
+            <a class="faction-card fac fac-ecrivains" href="#/univers/factions"><span>✒️</span><b>Les Écrivains</b><em>« Ce qui est nommé existe. »</em></a>
+            <a class="faction-card fac fac-musiciens" href="#/univers/factions"><span>🎻</span><b>Les Musiciens</b><em>Neutres… et fragmentés.</em></a>
+          </div>
+        </div>
+        <div class="welcome-col">
+          <h3>Nouvelles du forum</h3>
+          <ul class="latest">${news.map((t) => `<li><a href="#/t/${t.id}">${esc(t.title)}</a><span class="small muted">${fmtDay(t.created_at)}</span></li>`).join('') || '<li class="muted small">Aucune annonce pour l’instant.</li>'}</ul>
+          <h3>Derniers arrivés à Paris</h3>
+          <div class="mini-chars">${newChars.map((c) => `<a class="mini-char" href="#/perso/${c.id}" title="${esc(c.name)}">${charAvatar(c, 'sm')}<span>${esc(c.name)}</span></a>`).join('') || '<p class="muted small">Aucun personnage validé.</p>'}</div>
+        </div>
+        <div class="welcome-col">
+          <h3>Liens utiles</h3>
+          <ul class="quick-links">
+            <li><a href="#/univers/bienvenue">❦ Comment jouer</a></li>
+            <li><a href="#/univers/contexte">❦ La Fracture</a></li>
+            <li><a href="#/univers/lieux">❦ Paris aujourd’hui</a></li>
+            <li><a href="#/univers/reglement-rp">❦ Règlement RP</a></li>
+            <li><a href="#/fiche/nouvelle">❦ Créer mon personnage</a></li>
+            <li><a href="#/personnages">❦ Galerie des personnages</a></li>
           </ul>
         </div>
-        <div class="card side">
-          <h3>Dernières activités</h3>
-          <ul class="latest">${latestRows || '<li class="muted">Le silence règne… pour l’instant.</li>'}</ul>
+      </div>
+    </section>`;
+
+  const onlineHtml = onlineList === null ? '' : `
+      <div class="stat-block">
+        <h4>Présents ces dernières 24 heures (${onlineList.length})</h4>
+        <p class="small">${onlineList.map((m) => userLink(m)).join(', ') || '<span class="muted">Personne… pour l’instant.</span>'}</p>
+      </div>`;
+
+  return `${intro}
+    ${group('Le Grimoire', 'Avant d’entrer', [
+      wikiRow('#/univers/contexte', '📜', 'L’univers', 'La Fracture, les factions, les territoires de Paris : tout ce qu’il faut savoir avant de jouer.'),
+      wikiRow('#/personnages', '🎭', 'Les personnages', 'Galerie des fiches validées, à filtrer par faction.'),
+    ].join('') + hrpStart.map(forumRow).join(''))}
+    ${group('Paris', 'En jeu', rp.map(forumRow).join(''))}
+    ${group('Hors-jeu', 'Entre joueurs', hrpEnd.map(forumRow).join(''))}
+    ${cats.length ? '' : '<div class="card empty">Aucune catégorie. Lancez le script SQL.</div>'}
+
+    <section class="forum-group">
+      <div class="group-head"><span class="group-kicker">Le forum</span><h2>Qui est à Paris ?</h2></div>
+      <div class="card who">
+        <div class="stat-block">
+          <h4>Les factions</h4>
+          <div class="legend">${factionLegend}</div>
         </div>
-        <div class="card side">
-          <h3>Forces en présence</h3>
-          <div class="fac-panel">${facPanel}</div>
-          <p class="small"><a href="#/univers/factions">Lire les factions →</a></p>
+        ${onlineHtml}
+        <div class="stat-block stats-line">
+          <span><b>${members.count ?? 0}</b> membres</span>
+          <span><b>${chars.count ?? 0}</b> personnages</span>
+          <span><b>${topics.count ?? 0}</b> sujets</span>
+          <span><b>${posts.count ?? 0}</b> messages</span>
+          ${newest[0] ? `<span>Dernier inscrit : ${userLink(newest[0])}</span>` : ''}
         </div>
-        <div class="card side">
-          <h3>Nouveaux personnages</h3>
-          <div class="mini-chars">${charRows || '<p class="muted small">Aucun personnage validé pour l’instant.</p>'}</div>
-          <p class="small"><a href="#/personnages">Tous les personnages →</a></p>
-        </div>
-        <div class="card side stats">
-          <h3>Le forum en chiffres</h3>
-          <p><b>${members.count ?? 0}</b> membres · <b>${chars.count ?? 0}</b> personnages</p>
-          <p><b>${topics.count ?? 0}</b> sujets · <b>${posts.count ?? 0}</b> messages</p>
-          <p class="small"><a href="#/regles">Règlement du forum</a></p>
-        </div>
-      </aside>
-    </div>`;
+      </div>
+    </section>`;
 }
 
 async function viewCategory([slug, pageStr]) {
@@ -1369,6 +1411,17 @@ viewWikiEdit.after = (root, [slug]) => {
 // ---------------------------------------------------------------------
 //  Démarrage
 // ---------------------------------------------------------------------
+// Signale sa présence (pour « Présents ces dernières 24 heures »), au plus toutes les 5 minutes
+function touchLastSeen() {
+  if (!state.session) return;
+  try {
+    const last = Number(localStorage.getItem('last_seen_ping') || 0);
+    if (Date.now() - last < 5 * 60 * 1000) return;
+    localStorage.setItem('last_seen_ping', String(Date.now()));
+  } catch (e) { /* stockage indisponible */ }
+  sb.rpc('touch_last_seen').then(() => {});
+}
+
 async function start() {
   if (!configured) { renderNav(); return viewSetup(); }
   const { data } = await sb.auth.getSession();
@@ -1387,5 +1440,7 @@ async function start() {
   if (recovering && location.hash !== '#/reinitialiser') history.replaceState(null, '', location.pathname + '#/reinitialiser');
   window.addEventListener('hashchange', router);
   router();
+  touchLastSeen();
+  setInterval(touchLastSeen, 5 * 60 * 1000);
 }
 start();
