@@ -24,6 +24,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
@@ -361,3 +362,10 @@ button.link:hover { text-decoration: underline; }
 .wiki-row { grid-template-columns: 56px 1fr 180px; }
 .wiki .page-head { align-items: center; }
 .tabs { flex-wrap: wrap; }
+
+/* ---------- Choix d'image (avatar, personnage) ---------- */
+.image-picker { display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-bottom: .6rem; }
+.image-picker-fields { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
+.image-picker-fields label:not(.file-btn) { width: 100%; margin: .3rem 0 0; }
+.file-btn { margin: 0; color: var(--gold-2); cursor: pointer; }
+.ok-text { color: #a8d8b4; }
