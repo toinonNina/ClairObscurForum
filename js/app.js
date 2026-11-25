@@ -78,21 +78,35 @@ function initialAvatar(name, size = '') {
   const hue = [...(name || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
   return `<span class="avatar avatar-initial ${size}" style="--h:${hue}">${esc(letter)}</span>`;
 }
+// Cadrage d’une image : enregistré à la fin du lien, ex. « …/image.png#cadre=50,30,1.6 »
+// (x % , y % = point à privilégier ; z = zoom). Aucun changement de base de données nécessaire.
+function parseFrame(url) {
+  const m = /#cadre=([\d.]+),([\d.]+),([\d.]+)$/.exec(url || '');
+  return m ? { x: +m[1], y: +m[2], z: +m[3] } : { x: 50, y: 50, z: 1 };
+}
+const stripFrame = (url) => (url || '').replace(/#cadre=.*$/, '');
+const frameStyle = (f) => `object-position:${f.x}% ${f.y}%;transform:scale(${f.z});transform-origin:${f.x}% ${f.y}%`;
+const withFrame = (url, f) => (!url ? '' : (f.x === 50 && f.y === 50 && f.z === 1) ? url : `${url}#cadre=${Math.round(f.x)},${Math.round(f.y)},${f.z.toFixed(2)}`);
+
 function avatar(p, size = '') {
-  if (p?.avatar_url) return `<img class="avatar ${size}" src="${esc(p.avatar_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-name="${esc(p.username || '?')}">`;
-  return initialAvatar(p?.username, size);
+  if (!p?.avatar_url) return initialAvatar(p?.username, size);
+  const f = parseFrame(p.avatar_url);
+  return `<span class="avatar avatar-frame ${size}"><img src="${esc(stripFrame(p.avatar_url))}" style="${frameStyle(f)}" alt="" loading="lazy" referrerpolicy="no-referrer" data-name="${esc(p.username || '?')}"></span>`;
 }
 // Image cassée (lien mort, page web au lieu d’une image…) : on affiche l’initiale à la place
 document.addEventListener('error', (e) => {
   const img = e.target;
-  if (!(img instanceof HTMLImageElement) || !img.classList.contains('avatar') || img.dataset.preview !== undefined) return;
-  const size = [...img.classList].find((c) => ['xs', 'sm', 'lg', 'xl'].includes(c)) || '';
-  img.outerHTML = initialAvatar(img.dataset.name, size);
+  if (!(img instanceof HTMLImageElement)) return;
+  const frame = img.closest('.avatar-frame');
+  if (!frame || frame.closest('.cropper')) return;
+  const size = [...frame.classList].find((c) => ['xs', 'sm', 'lg', 'xl'].includes(c)) || '';
+  frame.outerHTML = initialAvatar(img.dataset.name, size);
 }, true);
 
 // ---- Images : envoi depuis l’ordinateur (Supabase Storage) ou lien direct ----
 const AVATAR_BUCKET = 'avatars';
-const MAX_IMAGE_MB = 2;
+const MAX_IMAGE_MB = 10;      // taille du fichier choisi ; il est réduit avant l’envoi
+const MAX_IMAGE_SIDE = 1000;  // côté maximal après réduction (pixels)
 function normalizeImageUrl(url) {
   let u = (url || '').trim();
   if (!u) return '';
@@ -112,15 +126,40 @@ function checkImage(url, timeout = 10000) {
     img.src = url;
   });
 }
+// Réduit une photo avant l’envoi (plus léger, plus rapide). Les GIF animés sont envoyés tels quels.
+async function shrinkImage(file) {
+  if (file.type === 'image/gif') return { blob: file, ext: 'gif', type: file.type };
+  const bmp = await createImageBitmap(file);
+  const ratio = Math.min(1, MAX_IMAGE_SIDE / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * ratio); c.height = Math.round(bmp.height * ratio);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  const blob = await new Promise((res) => c.toBlob(res, 'image/webp', 0.86));
+  if (blob && blob.type === 'image/webp') return { blob, ext: 'webp', type: 'image/webp' };
+  const jpg = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.86));
+  return { blob: jpg, ext: 'jpg', type: 'image/jpeg' };
+}
 const BAD_IMAGE = 'Ce lien ne mène pas directement à une image. Sur l’image, faites clic droit › « Copier l’adresse de l’image », ou utilisez le bouton « Envoyer une image ».';
 function imagePicker(current, name) {
+  const base = stripFrame(current);
+  const f = parseFrame(current);
   return `<div class="image-picker">
-      <img class="avatar xl" data-preview src="${esc(current || '')}" alt="" ${current ? '' : 'hidden'} referrerpolicy="no-referrer">
-      <span class="avatar xl avatar-initial" data-preview-empty style="--h:30" ${current ? 'hidden' : ''}>${esc((name || '?').charAt(0).toUpperCase())}</span>
+      <div class="cropper-wrap">
+        <div class="cropper avatar-frame" data-cropper ${base ? '' : 'hidden'} title="Glissez pour choisir la zone à afficher">
+          <img src="${esc(base)}" style="${frameStyle(f)}" alt="" referrerpolicy="no-referrer" draggable="false">
+        </div>
+        <span class="avatar xl avatar-initial" data-preview-empty style="--h:30" ${base ? 'hidden' : ''}>${esc((name || '?').charAt(0).toUpperCase())}</span>
+        <div class="crop-controls" data-crop-controls ${base ? '' : 'hidden'}>
+          <label class="zoom-label">🔍<input type="range" min="1" max="4" step="0.05" value="${f.z}" data-zoom aria-label="Zoom"></label>
+          <button type="button" class="link small" data-recenter>Recentrer</button>
+          <span class="small muted">Glissez l’image pour choisir la zone.</span>
+        </div>
+      </div>
+      <input type="hidden" name="frame" value="${f.x},${f.y},${f.z}">
       <div class="image-picker-fields">
         <label class="btn btn-small btn-ghost file-btn">📁 Envoyer une image<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-upload hidden></label>
-        <span class="small muted">PNG, JPG, WEBP ou GIF, ${MAX_IMAGE_MB} Mo maximum.</span>
-        <label>… ou lien direct vers une image<input name="avatar_url" type="text" inputmode="url" value="${esc(current || '')}" placeholder="https://…/image.png"></label>
+        <span class="small muted">PNG, JPG, WEBP ou GIF. Les photos sont réduites automatiquement.</span>
+        <label>… ou lien direct vers une image<input name="avatar_url" type="text" inputmode="url" value="${esc(base)}" placeholder="https://…/image.png"></label>
         <button type="button" class="link small" data-clear-image>Retirer l’image</button>
         <span class="small" data-image-status></span>
       </div>
@@ -130,17 +169,42 @@ function wireImagePicker(root, kind) {
   const box = root.querySelector('.image-picker');
   if (!box) return;
   const input = box.querySelector('input[name=avatar_url]');
-  const prev = box.querySelector('[data-preview]');
+  const frameInput = box.querySelector('input[name=frame]');
+  const crop = box.querySelector('[data-cropper]');
+  const img = crop.querySelector('img');
+  const controls = box.querySelector('[data-crop-controls]');
+  const zoom = box.querySelector('[data-zoom]');
   const empty = box.querySelector('[data-preview-empty]');
   const status = box.querySelector('[data-image-status]');
-  const show = async (url) => {
+  let f = (() => { const [x, y, z] = frameInput.value.split(',').map(Number); return { x, y, z }; })();
+  const apply = () => { img.style.cssText = frameStyle(f); frameInput.value = `${f.x},${f.y},${f.z}`; zoom.value = f.z; };
+  const setVisible = (on) => { crop.hidden = !on; controls.hidden = !on; empty.hidden = on; };
+
+  // Glisser (souris ou doigt) pour déplacer le point à privilégier
+  let drag = null;
+  crop.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, f: { ...f } }; crop.setPointerCapture(e.pointerId); crop.classList.add('dragging'); });
+  crop.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const size = crop.clientWidth || 1;
+    const k = 100 / size / Math.max(1, f.z - 0.4); // sensibilité
+    f.x = Math.min(100, Math.max(0, drag.f.x - (e.clientX - drag.x) * k));
+    f.y = Math.min(100, Math.max(0, drag.f.y - (e.clientY - drag.y) * k));
+    apply();
+  });
+  const end = () => { drag = null; crop.classList.remove('dragging'); };
+  crop.addEventListener('pointerup', end); crop.addEventListener('pointercancel', end);
+  crop.addEventListener('wheel', (e) => { e.preventDefault(); f.z = Math.min(4, Math.max(1, f.z - Math.sign(e.deltaY) * 0.1)); apply(); }, { passive: false });
+  zoom.addEventListener('input', () => { f.z = Number(zoom.value); apply(); });
+  box.querySelector('[data-recenter]').addEventListener('click', () => { f = { x: 50, y: 50, z: 1 }; apply(); });
+
+  const show = async (url, reset = true) => {
     status.textContent = '';
-    if (!url) { prev.hidden = true; empty.hidden = false; return; }
-    status.textContent = 'Vérification de l’image…';
+    if (!url) { setVisible(false); return; }
+    status.textContent = 'Vérification de l’image…'; status.className = 'small';
     const ok = await checkImage(url);
-    status.textContent = ok ? '✓ Image trouvée.' : BAD_IMAGE;
+    status.textContent = ok ? '✓ Image trouvée. Glissez-la et zoomez pour la cadrer.' : BAD_IMAGE;
     status.className = 'small ' + (ok ? 'ok-text' : 'danger');
-    if (ok) { prev.src = url; prev.hidden = false; empty.hidden = true; }
+    if (ok) { img.src = url; if (reset) f = { x: 50, y: 50, z: 1 }; apply(); setVisible(true); }
   };
   input.addEventListener('change', () => { input.value = normalizeImageUrl(input.value); show(input.value); });
   box.querySelector('[data-clear-image]').addEventListener('click', () => { input.value = ''; show(''); });
@@ -148,15 +212,16 @@ function wireImagePicker(root, kind) {
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > MAX_IMAGE_MB * 1024 * 1024) return toast(`Image trop lourde (${MAX_IMAGE_MB} Mo maximum).`, 'error');
-    status.textContent = 'Envoi en cours…'; status.className = 'small';
+    status.textContent = 'Préparation et envoi…'; status.className = 'small';
     try {
-      const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+      const { blob, ext, type } = await shrinkImage(file);
+      if (blob.size > 2 * 1024 * 1024) throw new Error('Image trop lourde après réduction (2 Mo maximum). Essayez une autre image.');
       const path = `${state.profile.id}/${kind}-${Date.now()}.${ext}`;
-      const { error } = await sb.storage.from(AVATAR_BUCKET).upload(path, file, { contentType: file.type, cacheControl: '31536000', upsert: false });
+      const { error } = await sb.storage.from(AVATAR_BUCKET).upload(path, blob, { contentType: type, cacheControl: '31536000', upsert: false });
       if (error) throw error;
       input.value = sb.storage.from(AVATAR_BUCKET).getPublicUrl(path).data.publicUrl;
       await show(input.value);
-      status.textContent = '✓ Image envoyée. Pensez à enregistrer.';
+      status.textContent = '✓ Image envoyée. Cadrez-la puis enregistrez.';
     } catch (err) {
       status.textContent = '';
       toast(/bucket not found/i.test(err.message || '') ? 'Le stockage d’images n’est pas encore activé : lancez le script supabase/avatars.sql dans Supabase.' : errMsg(err), 'error');
@@ -170,7 +235,8 @@ async function validImageOrNull(f) {
   if (!url) return null;
   if (!url.startsWith('https://')) throw new Error('Le lien de l’image doit commencer par https://');
   if (!(await checkImage(url))) throw new Error(BAD_IMAGE);
-  return url;
+  const [x, y, z] = (f.frame?.value || '50,50,1').split(',').map(Number);
+  return withFrame(url, { x, y, z });
 }
 function roleBadge(p) {
   if (!p) return '';
