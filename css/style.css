@@ -13,7 +13,7 @@
   --gold: #c9a45c;
   --gold-2: #e6c98a;
   --crimson: #9b2f42;
-  --petal: #d98a8a;
+  --petal: hsl(0, 76%, 43%);
   --sea: #4f7487;
   --ok: #5f9a6e;
   --radius: 10px;
@@ -89,7 +89,7 @@ mark { background: rgba(201, 164, 92, .35); color: inherit; border-radius: 3px; 
 .petal::after { /* nervure */
   content: ''; position: absolute; inset: 45% 15% auto 15%; height: 1px; background: rgba(255, 255, 255, .25); transform: rotate(35deg);
 }
-:root { --petal-light: #ff8f8f; --petal-red: #c8102e; --petal-dark: #7d0a1c; }
+:root { --petal-light: #ff5c5c; --petal-red: #d10f2f; --petal-dark: #8a0619; }
 :root[data-theme='light'] { --petal-light: #ff7a7a; --petal-red: #d0142f; --petal-dark: #8f0b20; }
 @keyframes petal-fall {
   0%   { transform: translate3d(0, -5vh, 0) rotate(0deg) rotateX(0deg); }
