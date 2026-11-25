@@ -506,3 +506,130 @@ html.theme-anim, html.theme-anim * { transition: background-color .35s, color .3
 .post-body h4 { font-family: var(--display); color: var(--gold-2); margin-bottom: .2rem; }
 .post-body hr { border: 0; height: 14px; background: radial-gradient(circle, var(--gold) 0 3px, transparent 4px) center / 14px 14px no-repeat, linear-gradient(90deg, transparent, var(--gold), transparent) center / 100% 1px no-repeat; opacity: .7; margin: 1.6rem 0; }
 .layout .prose { max-width: none; margin: 0 0 1.2rem; }
+
+/* =====================================================================
+   En-tête façon « forum RPG » : bannière peinte + barre de navigation
+   ===================================================================== */
+.site-header { position: relative; background: none; backdrop-filter: none; }
+.banner { position: relative; height: 190px; display: grid; place-items: center; overflow: hidden; border-bottom: 1px solid var(--line); }
+.banner-art {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(40% 90% at 50% 175%, rgba(18, 16, 25, .9) 30%, transparent 31%),
+    radial-gradient(30% 70% at 50% 35%, rgba(230, 201, 138, .32), transparent 70%),
+    radial-gradient(50% 90% at 12% 10%, rgba(194, 69, 45, .45), transparent 70%),
+    radial-gradient(50% 90% at 88% 10%, rgba(74, 99, 181, .45), transparent 70%),
+    linear-gradient(180deg, #2b2338, #3a2a3a 55%, #1b1823);
+}
+.banner-art::before { /* pluie de lettres */
+  content: 'A  ê  §  r  ¶  m  é  —  L  «  o  ç  N  »  t  ù  Ω  e  b  ï  P  ;  s  à  Q  æ  i  ð  F  y';
+  position: absolute; inset: -40% -5% 0; font: italic 1.5rem var(--serif); line-height: 2.4; letter-spacing: 2.2rem; word-spacing: .4rem;
+  color: rgba(230, 201, 138, .16); animation: letters 26s linear infinite; text-align: center;
+}
+.banner-art::after { /* silhouette de flèche parisienne, abstraite */
+  content: ''; position: absolute; left: 50%; bottom: 0; width: 70px; height: 62%; transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(230, 201, 138, .55), rgba(18, 16, 25, .95));
+  clip-path: polygon(50% 0, 56% 40%, 72% 70%, 100% 100%, 0 100%, 28% 70%, 44% 40%);
+  opacity: .55;
+}
+:root[data-theme='light'] .banner-art {
+  background:
+    radial-gradient(45% 140% at 50% 120%, rgba(60, 44, 58, .55) 30%, transparent 31%),
+    radial-gradient(30% 70% at 50% 35%, rgba(255, 240, 200, .9), transparent 70%),
+    radial-gradient(50% 90% at 12% 10%, rgba(214, 120, 100, .4), transparent 70%),
+    radial-gradient(50% 90% at 88% 10%, rgba(110, 135, 210, .35), transparent 70%),
+    linear-gradient(180deg, #f6e3c8, #ecd2bf 55%, #e9dcc4);
+}
+:root[data-theme='light'] .banner-art::before { color: rgba(74, 99, 181, .2); }
+.banner .brand { position: relative; flex-direction: column; text-align: center; gap: .5rem; }
+.banner .brand-text { align-items: center; }
+.banner .brand-name { font-size: 2.3rem; letter-spacing: .12em; text-shadow: 0 2px 18px rgba(0, 0, 0, .55); }
+:root[data-theme='light'] .banner .brand-name { text-shadow: 0 1px 14px rgba(255, 250, 235, .9); }
+.banner .brand-tag { font-size: 1rem; }
+.banner .brand-seal { width: 58px; height: 58px; font-size: 1.3rem; }
+.navbar { position: sticky; top: 0; z-index: 20; background: var(--header-bg); backdrop-filter: blur(6px); }
+.navbar-inner { display: flex; align-items: center; gap: 1rem; padding: .55rem 0; flex-wrap: wrap; }
+.navbar .header-search { margin-left: auto; }
+.navbar .header-search input { width: 220px; padding: .4rem .7rem; }
+
+/* ---------- Présentation d'accueil ---------- */
+.welcome { padding: 0; overflow: hidden; }
+.welcome-head { text-align: center; padding: 2rem 2rem 1.4rem; background: radial-gradient(60% 120% at 50% 0, color-mix(in srgb, var(--gold) 14%, transparent), transparent 70%); border-bottom: 1px solid var(--line); }
+.welcome-head h1 { font-size: 2.2rem; margin: .2rem 0 .6rem; }
+.welcome-lead { max-width: 760px; margin: 0 auto .8rem; font-size: 1.12rem; }
+.group-kicker { font: 600 .72rem var(--sans); letter-spacing: .28em; text-transform: uppercase; color: var(--gold-2); }
+.welcome-cols { display: grid; grid-template-columns: 1.2fr 1fr .8fr; }
+.welcome-col { padding: 1.2rem 1.4rem; }
+.welcome-col + .welcome-col { border-left: 1px solid var(--line); }
+.welcome-col h3 { font-size: .95rem; text-transform: uppercase; letter-spacing: .12em; color: var(--gold-2); margin: 0 0 .7rem; }
+.welcome-col h3:not(:first-child) { margin-top: 1.2rem; }
+.faction-cards { display: flex; flex-direction: column; gap: .6rem; }
+.faction-card { display: grid; grid-template-columns: 40px 1fr; grid-template-rows: auto auto; align-items: center; column-gap: .7rem; padding: .6rem .8rem; border: 1px solid var(--line); border-left: 4px solid var(--fac); border-radius: 8px; background: color-mix(in srgb, var(--fac) 10%, transparent); color: var(--text); }
+.faction-card:hover { text-decoration: none; border-color: var(--fac); color: var(--text); }
+.faction-card span { grid-row: 1 / 3; font-size: 1.6rem; text-align: center; }
+.faction-card b { font: 500 1rem var(--display); color: var(--fac-text); letter-spacing: .04em; }
+.faction-card em { font-size: .9rem; color: var(--muted); }
+.quick-links { list-style: none; padding: 0; margin: 0; }
+.quick-links li { padding: .35rem 0; border-bottom: 1px dashed var(--row-line); }
+.quick-links li:last-child { border-bottom: 0; }
+.welcome .mini-chars { grid-template-columns: repeat(5, 1fr); }
+
+/* ---------- Groupes de forums ---------- */
+.forum-group { margin: 2rem 0 0; }
+.group-head { text-align: center; margin-bottom: .8rem; }
+.group-head h2 { margin: .1rem 0 0; font-size: 1.55rem; }
+.group-head::after { content: ''; display: block; height: 14px; margin: .4rem auto 0; width: min(360px, 80%);
+  background: radial-gradient(circle, var(--gold) 0 3px, transparent 4px) center / 14px 14px no-repeat, linear-gradient(90deg, transparent, var(--gold), transparent) center / 100% 1px no-repeat; opacity: .8; }
+.forum-list { padding: 0; overflow: hidden; }
+.forum-row { display: grid; grid-template-columns: 64px 1fr 320px; gap: 1rem; align-items: center; padding: 1rem 1.3rem; border-bottom: 1px solid var(--row-line); }
+.forum-row:last-child { border-bottom: 0; }
+.forum-row:hover { background: color-mix(in srgb, var(--gold) 5%, transparent); }
+.forum-row.fac { box-shadow: inset 4px 0 0 var(--fac); }
+.forum-icon { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; font-size: 1.7rem; border: 1px solid var(--gold); background: var(--sunk); }
+.forum-icon:hover { text-decoration: none; }
+.forum-row.fac .forum-icon { border-color: var(--fac); box-shadow: 0 0 16px color-mix(in srgb, var(--fac) 35%, transparent); }
+.forum-title { font: 500 1.15rem var(--display); color: var(--gold-2); letter-spacing: .03em; }
+.forum-row.fac .forum-title { color: var(--fac-text); }
+.forum-desc { margin: .15rem 0 .25rem; color: var(--muted); font-size: .97rem; }
+.forum-counts { font: .75rem var(--sans); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.forum-last { display: flex; align-items: center; gap: .7rem; padding-left: 1rem; border-left: 1px solid var(--row-line); min-width: 0; }
+.forum-last > div { display: flex; flex-direction: column; min-width: 0; }
+.forum-last-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+
+/* ---------- Qui est à Paris ? ---------- */
+.who { padding: 0; }
+.stat-block { padding: 1rem 1.4rem; border-bottom: 1px solid var(--row-line); }
+.stat-block:last-child { border-bottom: 0; }
+.stat-block h4 { margin: 0 0 .5rem; font: 600 .75rem var(--sans); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.stat-block p { margin: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; }
+.legend-item { display: inline-flex; align-items: center; gap: .4rem; color: var(--fac-text); }
+.legend-item b { font: .8rem var(--sans); color: var(--muted); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--fac); box-shadow: 0 0 8px var(--fac); }
+.stats-line { display: flex; flex-wrap: wrap; gap: .4rem 1.6rem; }
+.stats-line b { color: var(--gold-2); }
+
+@media (max-width: 900px) {
+  .welcome-cols { grid-template-columns: 1fr; }
+  .welcome-col + .welcome-col { border-left: 0; border-top: 1px solid var(--line); }
+  .forum-row { grid-template-columns: 52px 1fr; }
+  .forum-last { grid-column: 1 / -1; border-left: 0; padding-left: 0; }
+  .forum-icon { width: 48px; height: 48px; font-size: 1.4rem; }
+  .banner { height: 150px; }
+  .banner .brand-name { font-size: 1.6rem; }
+  .navbar .header-search { width: 100%; margin-left: 0; }
+  .navbar .header-search input { width: 100%; }
+}
+/* Bannière : dégager le titre */
+.banner-art { background-position: center; }
+.banner-art::after { height: 46%; opacity: .35; }
+.banner .brand-tag { color: var(--text); opacity: .85; }
+:root[data-theme='light'] .banner-art {
+  background:
+    radial-gradient(40% 90% at 50% 175%, rgba(60, 44, 58, .35) 30%, transparent 31%),
+    radial-gradient(30% 70% at 50% 35%, rgba(255, 240, 200, .9), transparent 70%),
+    radial-gradient(50% 90% at 12% 10%, rgba(214, 120, 100, .4), transparent 70%),
+    radial-gradient(50% 90% at 88% 10%, rgba(110, 135, 210, .35), transparent 70%),
+    linear-gradient(180deg, #f6e3c8, #ecd2bf 55%, #e9dcc4);
+}
+:root[data-theme='light'] .banner-art::after { opacity: .18; }
