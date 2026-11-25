@@ -213,7 +213,7 @@ async function q(promise) {
   return count !== undefined && count !== null ? { data, count } : data;
 }
 const go = (hash) => { location.hash = hash; };
-const setTitle = (t) => { document.title = t ? `${t} — ${FORUM_NAME}` : `${FORUM_NAME} — Forum Clair Obscur`; };
+const setTitle = (t) => { document.title = (state.unread ? `(${state.unread}) ` : '') + (t ? `${t} — ${FORUM_NAME}` : `${FORUM_NAME} — Forum RPG`); };
 
 function pager(base, page, total, size) {
   const pages = Math.max(1, Math.ceil(total / size));
@@ -294,6 +294,7 @@ function renderNav() {
   const p = state.profile;
   let html = configured ? `<a href="#/">Accueil</a><a href="#/univers">Univers</a><a href="#/personnages">Personnages</a><a href="#/membres">Membres</a>` : '';
   if (p) {
+    html += `<a href="#/messages" class="nav-mail" title="Messagerie privée">✉ Messages<span id="unread-count"></span></a>`;
     if (isStaff()) html += `<a href="#/moderation" class="nav-mod">Modération<span id="report-count"></span></a>`;
     html += `<a href="#/u/${encodeURIComponent(p.username)}" class="nav-user">${avatar(p, 'xs')}<span>${esc(p.username)}</span></a>
              <a href="#/parametres" title="Paramètres">⚙</a>
@@ -315,6 +316,7 @@ function renderNav() {
     renderNav();
   });
   nav.querySelector('#logout')?.addEventListener('click', async () => { await sb.auth.signOut(); toast('À bientôt, expéditionnaire.'); go('#/'); });
+  if (p) refreshUnread();
   if (isStaff()) {
     sb.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'open').then(({ count }) => {
       const el = document.getElementById('report-count');
@@ -348,6 +350,9 @@ const routes = [
   [/^\/recherche$/, viewSearch],
   [/^\/moderation(?:\/(\w+))?$/, viewModeration],
   [/^\/regles$/, viewRules],
+  [/^\/messages$/, viewInbox],
+  [/^\/messages\/nouveau$/, viewCompose],
+  [/^\/messages\/(\d+)$/, viewConversation],
   [/^\/univers$/, viewWikiIndex],
   [/^\/univers\/([a-z0-9-]+)$/, viewWikiPage],
   [/^\/univers\/([a-z0-9-]+)\/modifier$/, viewWikiEdit],
@@ -427,6 +432,22 @@ async function viewHome() {
     sb.from('profiles').select('username,role,last_seen').gte('last_seen', since24).order('last_seen', { ascending: false }).limit(200),
     sb.from('characters').select('faction').eq('status', 'approved').limit(5000),
   ]);
+  const { data: staffList } = await sb.from('profiles').select('username,role,title,avatar_url').in('role', ['admin', 'moderator']).eq('banned', false).order('created_at');
+  const admins = (staffList || []).filter((m) => m.role === 'admin');
+  const mods = (staffList || []).filter((m) => m.role === 'moderator');
+  const staffCol = `
+        <div class="welcome-col staff-col">
+          <h3>L’administration</h3>
+          ${admins.map((a) => `
+            <div class="admin-card">
+              <a href="#/u/${encodeURIComponent(a.username)}">${avatar(a, 'xl')}</a>
+              ${userLink(a)}
+              ${a.title ? `<span class="author-title">${esc(a.title)}</span>` : ''}
+              ${roleBadge(a)}
+              ${state.profile && state.profile.username !== a.username ? `<a class="btn btn-small btn-ghost" href="#/messages/nouveau?a=${encodeURIComponent(a.username)}">✉ Écrire</a>` : ''}
+            </div>`).join('') || '<p class="muted small">Aucun administrateur.</p>'}
+          ${mods.length ? `<h3>Les Gardiens</h3><div class="mod-list">${mods.map((m) => `<a href="#/u/${encodeURIComponent(m.username)}" title="${esc(m.username)}">${avatar(m, 'sm')}<span>${esc(m.username)}</span></a>`).join('')}</div>` : ''}
+        </div>`;
   const onlineList = online.error ? null : online.data; // null si la colonne last_seen n’existe pas encore
   const facCount = {};
   (facRes.data || []).forEach((r) => { facCount[r.faction] = (facCount[r.faction] || 0) + 1; });
@@ -505,6 +526,7 @@ async function viewHome() {
             <li><a href="#/personnages">❦ Galerie des personnages</a></li>
           </ul>
         </div>
+        ${staffCol}
       </div>
     </section>`;
 
@@ -945,6 +967,7 @@ async function viewProfile([username]) {
         </div>
         <div class="profile-actions">
           ${self ? `<a class="btn btn-ghost" href="#/parametres">Modifier mon profil</a>` : ''}
+          ${!self && canWrite() ? `<a class="btn btn-small" href="#/messages/nouveau?a=${encodeURIComponent(p.username)}">✉ Envoyer un message</a>` : ''}
           ${canSanction ? `<button class="btn btn-small ${p.banned ? 'btn-ghost' : 'danger'}" id="ban">${p.banned ? 'Lever le bannissement' : 'Bannir'}</button>` : ''}
         </div>
       </div>
@@ -1409,6 +1432,153 @@ viewWikiEdit.after = (root, [slug]) => {
 };
 
 // ---------------------------------------------------------------------
+//  Messagerie privée
+// ---------------------------------------------------------------------
+async function refreshUnread() {
+  if (!state.profile) return;
+  const { data } = await sb.rpc('unread_count');
+  state.unread = data || 0;
+  const el = document.getElementById('unread-count');
+  if (el) el.innerHTML = data ? ` <span class="pill">${data}</span>` : '';
+  const base = document.title.replace(/^\(\d+\) /, '');
+  document.title = data ? `(${data}) ${base}` : base;
+}
+
+async function viewInbox() {
+  const need = requireLogin(); if (need) return need;
+  setTitle('Messagerie');
+  const rows = await q(sb.from('conversation_members')
+    .select('last_read_at,hidden,conversation:conversations(id,subject,is_broadcast,last_message_at,created_by)')
+    .eq('user_id', state.profile.id).eq('hidden', false).limit(300));
+  const convs = rows.filter((r) => r.conversation).sort((a, b) => new Date(b.conversation.last_message_at) - new Date(a.conversation.last_message_at));
+  const ids = convs.filter((r) => !r.conversation.is_broadcast).map((r) => r.conversation.id);
+  const parts = {};
+  if (ids.length) {
+    const mem = await q(sb.from('conversation_members').select('conversation_id,user:profiles(username,role,avatar_url)').in('conversation_id', ids));
+    mem.forEach((m) => { if (m.user && m.user.username !== state.profile.username) (parts[m.conversation_id] ||= []).push(m.user); });
+  }
+  const list = convs.map((r) => {
+    const c = r.conversation;
+    const unread = !r.last_read_at || new Date(c.last_message_at) > new Date(r.last_read_at);
+    const people = c.is_broadcast ? '<span class="badge badge-admin">📣 À tous les membres</span>' : (parts[c.id] || []).map((u) => esc(u.username)).join(', ') || '<span class="muted">Vous seul</span>';
+    const face = c.is_broadcast ? '<span class="avatar sm avatar-initial" style="--h:40">📣</span>' : avatar((parts[c.id] || [])[0], 'sm');
+    return `<a class="conv-row ${unread ? 'unread' : ''}" href="#/messages/${c.id}">
+      ${face}
+      <span class="conv-main"><span class="conv-subject">${unread ? '<span class="dot" title="Non lu"></span>' : ''}${esc(c.subject)}</span><span class="small muted">${people}</span></span>
+      <span class="small muted">${ago(c.last_message_at)}</span></a>`;
+  }).join('');
+  return `<div class="page-head"><div><h1>Messagerie</h1><p class="muted">Vos conversations privées.</p></div>
+      ${canWrite() ? '<a class="btn" href="#/messages/nouveau">✒ Nouveau message</a>' : ''}</div>
+    <div class="card conv-list">${list || '<p class="empty">Aucune conversation pour l’instant.</p>'}</div>`;
+}
+
+function viewCompose(_, params) {
+  const need = requireLogin(); if (need) return need;
+  if (!canWrite()) return `<div class="card empty"><p>Votre compte est suspendu.</p></div>`;
+  setTitle('Nouveau message');
+  const to = params.get('a') || '';
+  return `<nav class="crumbs"><a href="#/messages">Messagerie</a> › <span>Nouveau message</span></nav>
+    <form class="card form" id="compose">
+      <h1>Nouveau message</h1>
+      ${isStaff() ? `<label class="check"><input type="checkbox" name="all"> 📣 Envoyer à <b>tous les membres</b> (annonce : les membres pourront le lire mais pas y répondre)</label>` : ''}
+      <label data-to>Destinataire(s)<input name="to" value="${esc(to)}" placeholder="Pseudo, ou plusieurs pseudos séparés par des virgules" list="member-names" autocomplete="off"></label>
+      <datalist id="member-names"></datalist>
+      <label>Sujet<input name="subject" required maxlength="120"></label>
+      <label>Message</label>${editor('content').replace('maxlength="20000"', 'maxlength="10000"')}
+      <div class="form-actions"><a class="btn btn-ghost" href="#/messages">Annuler</a><button class="btn">Envoyer</button></div>
+    </form>`;
+}
+viewCompose.after = (root) => {
+  wireEditor(root);
+  const f = root.querySelector('#compose');
+  if (!f) return;
+  const toBox = f.querySelector('[data-to]');
+  f.all?.addEventListener('change', () => { toBox.hidden = f.all.checked; });
+  // suggestions de pseudos
+  let timer;
+  f.to.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const last = f.to.value.split(',').pop().trim();
+      if (last.length < 2) return;
+      const { data } = await sb.from('profiles').select('username').ilike('username', `${last.replace(/[%_\\]/g, '\\$&')}%`).limit(8);
+      const before = f.to.value.includes(',') ? f.to.value.slice(0, f.to.value.lastIndexOf(',') + 1) + ' ' : '';
+      root.querySelector('#member-names').innerHTML = (data || []).map((m) => `<option value="${esc(before + m.username)}">`).join('');
+    }, 250);
+  });
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = f.querySelector('button.btn:not(.btn-ghost)');
+    btn.disabled = true;
+    try {
+      const subject = f.subject.value.trim();
+      const content = f.content.value.trim();
+      let id;
+      if (f.all?.checked) {
+        if (!confirm('Envoyer ce message à TOUS les membres ?')) { btn.disabled = false; return; }
+        id = await q(sb.rpc('broadcast_message', { p_subject: subject, p_content: content }));
+      } else {
+        const names = f.to.value.split(',').map((x) => x.trim()).filter(Boolean);
+        if (!names.length) throw new Error('Indiquez au moins un destinataire.');
+        id = await q(sb.rpc('start_conversation', { p_usernames: names, p_subject: subject, p_content: content }));
+      }
+      toast('Message envoyé.', 'ok');
+      go(`#/messages/${id}`);
+    } catch (err) { fail(err); btn.disabled = false; }
+  });
+};
+
+async function viewConversation([idStr]) {
+  const need = requireLogin(); if (need) return need;
+  const id = Number(idStr);
+  const conv = await q(sb.from('conversations').select('*').eq('id', id).maybeSingle());
+  if (!conv) return `<div class="card empty"><h2>Conversation introuvable</h2><p>Elle n’existe pas, ou vous n’y participez pas.</p><p><a href="#/messages">Retour à la messagerie</a></p></div>`;
+  setTitle(conv.subject);
+  const [msgs, mem] = await Promise.all([
+    q(sb.from('private_messages').select('id,content,created_at,author_id,author:profiles(username,role,avatar_url,title)').eq('conversation_id', id).order('created_at').limit(500)),
+    conv.is_broadcast ? [] : q(sb.from('conversation_members').select('user:profiles(username,role)').eq('conversation_id', id)),
+  ]);
+  // marquer comme lu
+  sb.from('conversation_members').update({ last_read_at: new Date().toISOString() }).eq('conversation_id', id).eq('user_id', state.profile.id).then(refreshUnread);
+  const people = conv.is_broadcast ? '📣 Message envoyé à tous les membres' : 'Participants : ' + mem.map((m) => userLink(m.user)).join(', ');
+  const canReply = canWrite() && (!conv.is_broadcast || isStaff());
+  return `<nav class="crumbs"><a href="#/messages">Messagerie</a> › <span>${esc(conv.subject)}</span></nav>
+    <div class="page-head"><div><h1>${esc(conv.subject)}</h1><p class="muted small">${people}</p></div>
+      <button class="btn btn-small btn-ghost" id="hide-conv">Retirer de ma boîte</button></div>
+    <div class="pm-thread">${msgs.map((m) => `
+      <article class="pm ${m.author_id === state.profile.id ? 'mine' : ''}">
+        ${avatar(m.author, 'sm')}
+        <div class="pm-bubble card">
+          <header class="small muted">${userLink(m.author)} · ${fmtDate(m.created_at)}</header>
+          <div class="post-body">${renderContent(m.content)}</div>
+        </div>
+      </article>`).join('')}</div>
+    ${canReply ? `<form class="card reply" id="pm-reply"><h3>Répondre</h3>${editor('content').replace('maxlength="20000"', 'maxlength="10000"')}<div class="form-actions"><button class="btn">Envoyer</button></div></form>`
+      : `<div class="card empty small">${conv.is_broadcast ? 'Ce message a été envoyé à tous les membres : on ne peut pas y répondre ici. Pour répondre, écrivez directement à son auteur.' : 'Votre compte ne peut pas répondre.'}</div>`}`;
+}
+viewConversation.after = (root, [idStr]) => {
+  const id = Number(idStr);
+  wireEditor(root);
+  root.querySelector('.pm:last-child')?.scrollIntoView({ block: 'center' });
+  root.querySelector('#pm-reply')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const content = e.target.content.value.trim();
+    if (!content) return;
+    try {
+      await q(sb.from('private_messages').insert({ conversation_id: id, author_id: state.profile.id, content }));
+      router();
+    } catch (err) { fail(err); }
+  });
+  root.querySelector('#hide-conv')?.addEventListener('click', async () => {
+    try {
+      await q(sb.from('conversation_members').update({ hidden: true }).eq('conversation_id', id).eq('user_id', state.profile.id));
+      toast('Conversation retirée de votre boîte. Elle reviendra si quelqu’un y répond.', 'ok');
+      go('#/messages');
+    } catch (err) { fail(err); }
+  });
+};
+
+// ---------------------------------------------------------------------
 //  Démarrage
 // ---------------------------------------------------------------------
 // Signale sa présence (pour « Présents ces dernières 24 heures »), au plus toutes les 5 minutes
@@ -1442,5 +1612,6 @@ async function start() {
   router();
   touchLastSeen();
   setInterval(touchLastSeen, 5 * 60 * 1000);
+  setInterval(refreshUnread, 60 * 1000);
 }
 start();
