@@ -633,3 +633,32 @@ html.theme-anim, html.theme-anim * { transition: background-color .35s, color .3
     linear-gradient(180deg, #f6e3c8, #ecd2bf 55%, #e9dcc4);
 }
 :root[data-theme='light'] .banner-art::after { opacity: .18; }
+
+/* ---------- Colonne « L'administration » ---------- */
+.welcome-cols { grid-template-columns: 1.15fr 1fr .85fr .85fr; }
+.staff-col { text-align: center; background: color-mix(in srgb, var(--gold) 5%, transparent); }
+.admin-card { display: flex; flex-direction: column; align-items: center; gap: .3rem; margin-bottom: 1rem; }
+.admin-card .avatar.xl { box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 18%, transparent), 0 0 24px color-mix(in srgb, var(--gold) 30%, transparent); }
+.admin-card .user-link { font: 500 1.15rem var(--display); }
+.admin-card .btn { margin-top: .3rem; }
+.mod-list { display: flex; flex-wrap: wrap; gap: .6rem; justify-content: center; }
+.mod-list a { display: flex; flex-direction: column; align-items: center; gap: .2rem; font-size: .85rem; color: var(--sea-text); }
+@media (max-width: 1100px) { .welcome-cols { grid-template-columns: 1fr 1fr; } .welcome-col + .welcome-col { border-left: 0; } .welcome-col { border-top: 1px solid var(--line); } }
+@media (max-width: 700px) { .welcome-cols { grid-template-columns: 1fr; } }
+
+/* ---------- Messagerie ---------- */
+.conv-list { padding: 0; }
+.conv-row { display: grid; grid-template-columns: 44px 1fr auto; gap: .9rem; align-items: center; padding: .85rem 1.2rem; border-bottom: 1px solid var(--row-line); color: var(--text); }
+.conv-row:last-child { border-bottom: 0; }
+.conv-row:hover { text-decoration: none; background: color-mix(in srgb, var(--gold) 6%, transparent); color: var(--text); }
+.conv-main { display: flex; flex-direction: column; min-width: 0; }
+.conv-subject { font-size: 1.05rem; }
+.conv-row.unread .conv-subject { font-weight: 700; color: var(--parchment); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--crimson); margin-right: .5rem; vertical-align: middle; box-shadow: 0 0 6px var(--crimson); }
+.pm-thread { display: flex; flex-direction: column; gap: .9rem; margin-bottom: 1.2rem; }
+.pm { display: flex; gap: .7rem; align-items: flex-start; max-width: 82%; }
+.pm.mine { align-self: flex-end; flex-direction: row-reverse; }
+.pm-bubble { margin: 0; padding: .7rem 1rem; }
+.pm.mine .pm-bubble { background: linear-gradient(180deg, color-mix(in srgb, var(--gold) 14%, transparent), color-mix(in srgb, var(--gold) 6%, transparent)), var(--card-bg); }
+.pm-bubble header { margin-bottom: .3rem; font-family: var(--sans); }
+.nav-mail { white-space: nowrap; }
