@@ -1,5 +1,5 @@
 // =====================================================================
-//  Les Chroniques de Lumière — forum RPG Clair Obscur (sans build)
+//  Paris après la Fracture — forum RPG inspiré de Clair Obscur (sans build)
 //  Site statique (GitHub Pages) + Supabase (PostgreSQL, comptes, sécurité)
 // =====================================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -16,7 +16,22 @@ const sb = configured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 const state = { session: null, profile: null };
 const ROLE_LABEL = { admin: 'Administrateur', moderator: 'Gardien', member: 'Membre' };
-const FACTIONS = ['Habitant de Lumière', 'Expéditionnaire', 'Créature du Continent', 'Autre'];
+// Factions de Paris après la Fracture (valeur enregistrée, groupe, icône, classe de couleur)
+const FACTION_LIST = [
+  { value: 'Peintres', group: 'Peintres — Les Architectes Visuels', icon: '🎨', key: 'peintres' },
+  { value: 'Écrivains', group: 'Écrivains — Les Tisseurs du Réel', icon: '✒️', key: 'ecrivains' },
+  { value: 'Musiciens — Healers', group: 'Musiciens — Les Neutres Fragmentés', icon: '✨', key: 'healers' },
+  { value: 'Musiciens — Dreamers', group: 'Musiciens — Les Neutres Fragmentés', icon: '🌙', key: 'dreamers' },
+  { value: 'Musiciens — Discordants', group: 'Musiciens — Les Neutres Fragmentés', icon: '🔥', key: 'discordants' },
+  { value: 'Musiciens (sans culte)', group: 'Musiciens — Les Neutres Fragmentés', icon: '🎻', key: 'musiciens' },
+  { value: 'Sans allégeance', group: 'Autres', icon: '◌', key: 'neutre' },
+];
+const FACTIONS = FACTION_LIST.map((f) => f.value);
+const factionInfo = (v) => FACTION_LIST.find((f) => f.value === v) || { value: v, icon: '◌', key: 'neutre' };
+const facClass = (v) => `fac fac-${factionInfo(v).key}`;
+const factionBadge = (v) => `<span class="badge badge-faction ${facClass(v)}">${factionInfo(v).icon} ${esc(v)}</span>`;
+// Couleur des territoires (zones RP) selon la faction qui les tient
+const TERRITORY_FAC = { montmartre: 'peintres', 'quartier-latin': 'ecrivains', catacombes: 'musiciens', seine: 'ecrivains', fractures: 'discordants', reves: 'dreamers', evenements: 'healers' };
 const STATUS_LABEL = { draft: 'Brouillon', pending: 'En attente de validation', approved: 'Validée', rejected: 'À retravailler', archived: 'Archivée' };
 const CHAR_COLS = 'id,name,age,faction,occupation,avatar_url,quote,status,owner_id';
 
@@ -407,17 +422,27 @@ async function viewHome() {
     sb.from('characters').select('id', { count: 'exact', head: true }).eq('status', 'approved'),
     q(sb.from('characters').select(CHAR_COLS).eq('status', 'approved').order('validated_at', { ascending: false }).limit(6)),
   ]);
+  const { data: facRows } = await sb.from('characters').select('faction').eq('status', 'approved').limit(5000);
+  const facCount = {};
+  (facRows || []).forEach((r) => { facCount[r.faction] = (facCount[r.faction] || 0) + 1; });
+  const facMax = Math.max(1, ...Object.values(facCount));
+  const facPanel = FACTION_LIST.filter((f) => f.key !== 'neutre' || facCount[f.value]).map((f) => `
+    <a class="fac-line ${facClass(f.value)}" href="#/personnages/${encodeURIComponent(f.value)}">
+      <span>${f.icon} ${esc(f.value.replace('Musiciens — ', ''))}</span><b>${facCount[f.value] || 0}</b>
+      <span class="fac-bar"><span style="width:${Math.round(((facCount[f.value] || 0) / facMax) * 100)}%"></span></span>
+    </a>`).join('');
   const welcome = state.session ? '' : `
     <section class="hero card">
       <div class="hero-canvas" aria-hidden="true"></div>
       <div class="hero-text">
-        <h1>Chaque année, un nombre de plus est peint.</h1>
-        <p>Forum de <b>jeu de rôle par écrit</b> dans l’univers de <em>Clair Obscur : Expedition 33</em>. Créez votre personnage, rejoignez Lumière ou l’Expédition, et écrivez avec nous l’histoire de ceux qui refusent le Gommage.</p>
-        <p><a class="btn" href="#/inscription">Rejoindre le forum</a> <a class="btn btn-ghost" href="#/univers/bienvenue">Comment jouer ?</a></p>
+        <p class="hero-kicker">Après la Fracture</p>
+        <h1>Seul Paris a survécu.</h1>
+        <p>Peintres et Écrivains se disputent le monopole de la création du nouveau monde ; les Musiciens, neutres et divisés, font pencher la balance. Forum de <b>jeu de rôle par écrit</b> inspiré de <em>Clair Obscur : Expedition 33</em>.</p>
+        <p><a class="btn" href="#/inscription">Rejoindre le forum</a> <a class="btn btn-ghost" href="#/univers/contexte">Découvrir l’univers</a></p>
       </div>
     </section>`;
   const row = (c) => `
-    <a class="cat-row" href="#/c/${esc(c.slug)}">
+    <a class="cat-row ${TERRITORY_FAC[c.slug] ? 'fac fac-' + TERRITORY_FAC[c.slug] : ''}" href="#/c/${esc(c.slug)}">
       <span class="cat-icon">${esc(c.icon || '✦')}</span>
       <span class="cat-main"><span class="cat-name">${esc(c.name)}</span><span class="cat-desc">${esc(c.description || '')}</span></span>
       <span class="cat-stat"><b>${c.topic_count}</b> sujets</span>
@@ -435,7 +460,7 @@ async function viewHome() {
   return `${welcome}
     <div class="layout">
       <section>
-        ${group('rp', 'En jeu', 'On écrit en incarnant son personnage')}
+        ${group('rp', 'Paris', 'En jeu : on écrit en incarnant son personnage')}
         ${group('hrp', 'Hors-jeu', 'On parle en tant que joueur')}
         ${cats.length ? '' : '<div class="card empty">Aucune catégorie. Lancez le script SQL.</div>'}
       </section>
@@ -444,7 +469,9 @@ async function viewHome() {
           <h3>Commencer</h3>
           <ul class="latest">
             <li><a href="#/univers/bienvenue">Bienvenue &amp; comment jouer</a></li>
-            <li><a href="#/univers/contexte">Le contexte</a></li>
+            <li><a href="#/univers/contexte">La Fracture</a></li>
+            <li><a href="#/univers/factions">Les factions</a></li>
+            <li><a href="#/univers/lieux">Paris aujourd’hui</a></li>
             <li><a href="#/univers/reglement-rp">Règlement RP</a></li>
             <li><a href="#/fiche/nouvelle">Créer mon personnage</a></li>
           </ul>
@@ -452,6 +479,11 @@ async function viewHome() {
         <div class="card side">
           <h3>Dernières activités</h3>
           <ul class="latest">${latestRows || '<li class="muted">Le silence règne… pour l’instant.</li>'}</ul>
+        </div>
+        <div class="card side">
+          <h3>Forces en présence</h3>
+          <div class="fac-panel">${facPanel}</div>
+          <p class="small"><a href="#/univers/factions">Lire les factions →</a></p>
         </div>
         <div class="card side">
           <h3>Nouveaux personnages</h3>
@@ -539,13 +571,13 @@ async function viewTopic([idStr, pageStr]) {
       canWrite() && !mine ? `<button class="link" data-act="report" data-id="${p.id}">Signaler</button>` : '',
     ].filter(Boolean).join('');
     return `
-    <article class="post card ${isRp ? 'post-rp' : ''}" id="p${p.id}" data-who="${esc(isRp ? (p.character?.name || 'Le Narrateur') : (p.author?.username || 'Quelqu’un'))}">
+    <article class="post card ${isRp ? 'post-rp' : ''} ${isRp && p.character ? facClass(p.character.faction) : ''}" id="p${p.id}" data-who="${esc(isRp ? (p.character?.name || 'Le Narrateur') : (p.author?.username || 'Quelqu’un'))}">
       ${isRp ? (p.character ? `
       <aside class="post-author">
         ${charAvatar(p.character, 'lg')}
         ${charLink(p.character)}
         ${p.character.occupation ? `<span class="author-title">${esc(p.character.occupation)}</span>` : ''}
-        <span class="badge badge-faction">${esc(p.character.faction)}</span>
+        ${factionBadge(p.character.faction)}
         <span class="small muted">joué par ${userLink(p.author)}</span>
       </aside>` : `
       <aside class="post-author narrator">
@@ -768,7 +800,7 @@ function viewLogin() {
     <label>Adresse e-mail<input type="email" name="email" required autocomplete="email"></label>
     <label>Mot de passe<input type="password" name="password" required autocomplete="current-password"></label>
     <div class="form-actions"><a href="#/oubli" class="small">Mot de passe oublié ?</a><button class="btn" type="submit">Se connecter</button></div>
-    <p class="small muted">Pas encore de compte ? <a href="#/inscription">Rejoindre l’Expédition</a></p>
+    <p class="small muted">Pas encore de compte ? <a href="#/inscription">Rejoindre Paris</a></p>
   </form>`;
 }
 viewLogin.after = (root) => {
@@ -787,7 +819,7 @@ function viewSignup() {
   setTitle('Inscription');
   if (state.session) { go('#/'); return ''; }
   return `<form class="card form narrow" id="signup">
-    <h1>Rejoindre l’Expédition</h1>
+    <h1>Rejoindre Paris</h1>
     <label>Pseudo<input name="username" required minlength="3" maxlength="24" pattern="[A-Za-z0-9_.\\-]+" title="3 à 24 caractères : lettres, chiffres, _ . -" autocomplete="username"></label>
     <label>Adresse e-mail<input type="email" name="email" required autocomplete="email"></label>
     <label>Mot de passe<input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
@@ -1101,11 +1133,11 @@ function viewRules() {
 //  Personnages (fiches)
 // ---------------------------------------------------------------------
 const charCard = (c) => `
-  <a class="char-card card" href="#/perso/${c.id}">
+  <a class="char-card card ${facClass(c.faction)}" href="#/perso/${c.id}">
     ${charAvatar(c, 'xl')}
     <b>${esc(c.name)}</b>
     <span class="small muted">${esc(c.occupation || '')}${c.age != null ? ` · ${c.age} ans` : ''}</span>
-    <span class="badge badge-faction">${esc(c.faction)}</span>
+    ${factionBadge(c.faction)}
     ${c.status !== 'approved' ? statusBadge(c.status) : ''}
   </a>`;
 
@@ -1117,9 +1149,9 @@ async function viewCharacters([faction]) {
     q(query),
     state.profile ? q(sb.from('characters').select(CHAR_COLS).eq('owner_id', state.profile.id).neq('status', 'approved').order('created_at')) : [],
   ]);
-  const tabs = [['', 'Tous'], ...FACTIONS.map((f) => [f, f])].map(([v, l]) =>
+  const tabs = [['', 'Tous'], ...FACTION_LIST.map((f) => [f.value, `${f.icon} ${f.value.replace('Musiciens — ', '')}`])].map(([v, l]) =>
     `<a href="#/personnages${v ? '/' + encodeURIComponent(v) : ''}" class="${(faction || '') === v ? 'active' : ''}">${esc(l)}</a>`).join('');
-  return `<div class="page-head"><div><h1>Les personnages</h1><p class="muted">Ceux qui peuplent Lumière et le Continent.</p></div>
+  return `<div class="page-head"><div><h1>Les personnages</h1><p class="muted">Ceux qui arpentent les ruines de Paris après la Fracture.</p></div>
       ${canWrite() ? '<a class="btn" href="#/fiche/nouvelle">✒ Créer un personnage</a>' : ''}</div>
     ${mine.length ? `<h2 class="section-title">Mes fiches en cours</h2><div class="char-grid">${mine.map(charCard).join('')}</div>` : ''}
     <nav class="tabs">${tabs}</nav>
@@ -1154,13 +1186,13 @@ async function viewCharacter([idStr]) {
     </form>` : '';
   return `
     <nav class="crumbs"><a href="#/personnages">Personnages</a> › <span>${esc(c.name)}</span></nav>
-    <article class="card fiche">
+    <article class="card fiche ${facClass(c.faction)}">
       <div class="profile-head">
         ${charAvatar(c, 'xl')}
         <div>
           <h1>${esc(c.name)}</h1>
           ${c.quote ? `<p class="author-title">« ${esc(c.quote)} »</p>` : ''}
-          <p><span class="badge badge-faction">${esc(c.faction)}</span> ${statusBadge(c.status)}</p>
+          <p>${factionBadge(c.faction)} ${statusBadge(c.status)}</p>
         </div>
         <div class="profile-actions">${ownerActions}</div>
       </div>
@@ -1200,13 +1232,15 @@ viewCharacter.after = (root, [idStr]) => {
 async function viewCharacterForm([idStr]) {
   const need = requireLogin(); if (need) return need;
   if (!canWrite()) return `<div class="card empty"><p>Votre compte est suspendu.</p></div>`;
-  let c = { faction: FACTIONS[0] };
+  let c = { faction: 'Sans allégeance' };
   if (idStr) {
     c = await q(sb.from('characters').select('*').eq('id', Number(idStr)).maybeSingle());
     if (!c || (c.owner_id !== state.profile.id && !isStaff())) return `<div class="card empty"><h2>Fiche introuvable</h2></div>`;
   }
   setTitle(idStr ? `Modifier ${c.name}` : 'Nouveau personnage');
-  const factionOpts = [...new Set([...FACTIONS, c.faction])].map((f) => `<option ${f === c.faction ? 'selected' : ''}>${esc(f)}</option>`).join('');
+  const groups = [...new Set(FACTION_LIST.map((f) => f.group))];
+  let factionOpts = groups.map((g) => `<optgroup label="${esc(g)}">${FACTION_LIST.filter((f) => f.group === g).map((f) => `<option value="${esc(f.value)}" ${f.value === c.faction ? 'selected' : ''}>${f.icon} ${esc(f.value)}</option>`).join('')}</optgroup>`).join('');
+  if (!FACTIONS.includes(c.faction)) factionOpts += `<option selected>${esc(c.faction)}</option>`;
   const area = (name, label, max, rows, ph) => `<label>${label}</label>
     <div class="editor">${editorToolbar}<textarea name="${name}" rows="${rows}" maxlength="${max}" placeholder="${esc(ph)}">${esc(c[name] || '')}</textarea><div class="preview post-body" hidden></div></div>`;
   return `
@@ -1217,15 +1251,15 @@ async function viewCharacterForm([idStr]) {
       <div class="form-grid">
         <label>Nom<input name="name" required minlength="2" maxlength="60" value="${esc(c.name || '')}"></label>
         <label>Âge<input name="age" type="number" min="0" max="1000" value="${c.age ?? ''}"></label>
-        <label>Origine / camp<select name="faction">${factionOpts}</select></label>
+        <label>Faction <a href="#/univers/factions" target="_blank" class="small">(lire)</a><select name="faction">${factionOpts}</select></label>
         <label>Occupation<input name="occupation" maxlength="80" value="${esc(c.occupation || '')}" placeholder="Ex. : forgeronne, cartographe…"></label>
       </div>
       <label>Image du personnage <span class="muted">(une illustration dont vous avez les droits, ou une création à vous)</span></label>${imagePicker(c.avatar_url, c.name)}
       <label>Citation<input name="quote" maxlength="200" value="${esc(c.quote || '')}" placeholder="Une phrase qui le résume"></label>
       ${area('appearance', 'Apparence', 6000, 5, 'Taille, visage, tenue, signes distinctifs…')}
       ${area('personality', 'Caractère', 6000, 5, 'Qualités, défauts, peurs, ce qui le fait avancer…')}
-      ${area('history', 'Histoire', 20000, 10, 'Son passé, ce que le Gommage lui a pris, pourquoi il part ou reste…')}
-      ${area('abilities', 'Capacités', 6000, 4, 'Armes, talents, limites…')}
+      ${area('history', 'Histoire', 20000, 10, 'Qu’a-t-il vécu pendant la Fracture ? Pourquoi a-t-il rejoint (ou fui) sa faction ?')}
+      ${area('abilities', 'Capacités', 6000, 4, 'Pouvoirs (voir les pouvoirs possibles de sa faction), leurs limites et leur coût…')}
       <div class="form-actions">
         <a class="btn btn-ghost" href="${idStr ? '#/perso/' + c.id : '#/personnages'}">Annuler</a>
         <button class="btn btn-ghost" type="submit" data-mode="save">Enregistrer</button>
