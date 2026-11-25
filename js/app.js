@@ -35,6 +35,20 @@ const TERRITORY_FAC = { montmartre: 'peintres', 'quartier-latin': 'ecrivains', c
 const STATUS_LABEL = { draft: 'Brouillon', pending: 'En attente de validation', approved: 'Validée', rejected: 'À retravailler', archived: 'Archivée' };
 const CHAR_COLS = 'id,name,age,faction,occupation,avatar_url,quote,status,owner_id';
 
+// Pétales rouges qui tombent en arrière-plan (animation légère, désactivée si l'appareil demande moins d'animations)
+(function petals() {
+  const box = document.querySelector('.petals');
+  if (!box || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const count = innerWidth < 700 ? 18 : 40;   // nombre de pétales (moins sur mobile)
+  const r = (a, b) => a + Math.random() * (b - a);
+  let html = '';
+  for (let i = 0; i < count; i++) {
+    const d = r(11, 24);
+    html += `<span class="petal" style="--x:${r(0, 100).toFixed(1)}vw;--s:${r(9, 20).toFixed(0)}px;--o:${r(.45, .9).toFixed(2)};--d:${d.toFixed(1)}s;--delay:${(-r(0, d)).toFixed(1)}s;--sway:${r(-12, 12).toFixed(1)}vw"></span>`;
+  }
+  box.innerHTML = html;
+})();
+
 document.getElementById('brand-name').textContent = FORUM_NAME;
 document.getElementById('brand-tag').textContent = FORUM_TAGLINE;
 
