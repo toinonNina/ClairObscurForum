@@ -344,7 +344,7 @@ function wireEditor(root) {
     });
   });
 }
-const editor = (name, value = '', placeholder = 'Votre message… (Markdown accepté, ||texte|| pour un spoiler)') => `
+const editor = (name, value = '', placeholder = 'Votre message… (Markdown accepté, ||texte|| pour un spoiler, @pseudo pour prévenir un membre)') => `
   <div class="editor">${editorToolbar}
     <textarea name="${name}" rows="8" required maxlength="20000" placeholder="${esc(placeholder)}">${esc(value)}</textarea>
     <div class="preview post-body" hidden></div>
@@ -372,8 +372,9 @@ async function loadProfile() {
 
 function renderNav() {
   const p = state.profile;
-  let html = configured ? `<a href="#/">Accueil</a><a href="#/univers">Univers</a><a href="#/personnages">Personnages</a><a href="#/membres">Membres</a>` : '';
+  let html = configured ? `<a href="#/">Accueil</a><a href="#/univers">Univers</a><a href="#/carte">Carte</a><a href="#/personnages">Personnages</a><a href="#/membres">Membres</a>` : '';
   if (p) {
+    html += `<a href="#/notifications" class="nav-bell" title="Notifications" aria-label="Notifications">🔔<span id="notif-count"></span></a>`;
     html += `<a href="#/messages" class="nav-mail" title="Messagerie privée">✉ Messages<span id="unread-count"></span></a>`;
     if (isStaff()) html += `<a href="#/moderation" class="nav-mod">Modération<span id="report-count"></span></a>`;
     html += `<a href="#/u/${encodeURIComponent(p.username)}" class="nav-user">${avatar(p, 'xs')}<span>${esc(p.username)}</span></a>
@@ -431,6 +432,13 @@ const routes = [
   [/^\/moderation(?:\/(\w+))?$/, viewModeration],
   [/^\/regles$/, viewRules],
   [/^\/messages$/, viewInbox],
+  [/^\/notifications$/, viewNotifications],
+  [/^\/m\/(\d+)$/, viewPostJump],
+  [/^\/carte$/, viewMap],
+  [/^\/chronologie$/, viewTimeline],
+  [/^\/bottin$/, viewFaceclaims],
+  [/^\/classement$/, viewHonor],
+  [/^\/fractures$/, viewFractures],
   [/^\/predefinis$/, viewPredefList],
   [/^\/predefini\/nouveau$/, viewPredefForm],
   [/^\/predefini\/demande$/, viewPredefForm],
@@ -471,6 +479,11 @@ async function router() {
       if (token === navToken) app.innerHTML = `<div class="card empty"><h2>Un voile d’obscurité…</h2><p>${esc(errMsg(e))}</p><p><a href="#/">Retour à l’accueil</a></p></div>`;
     }
     window.scrollTo(0, 0);
+    if (state.anchor) {
+      const el = document.getElementById(state.anchor);
+      state.anchor = null;
+      if (el) { el.scrollIntoView({ block: 'start' }); el.classList.add('post-target'); }
+    }
     return;
   }
   setTitle('Introuvable');
@@ -518,6 +531,7 @@ async function viewHome() {
     sb.from('characters').select('faction').eq('status', 'approved').limit(5000),
   ]);
   const { count: predefOpen } = await sb.from('predefined_characters').select('id', { count: 'exact', head: true }).eq('status', 'open');
+  const fractures = await activeFractures();
   const { data: staffList } = await sb.from('profiles').select('username,role,title,avatar_url').in('role', ['admin', 'moderator']).eq('banned', false).order('created_at');
   const admins = (staffList || []).filter((m) => m.role === 'admin');
   const mods = (staffList || []).filter((m) => m.role === 'moderator');
@@ -623,9 +637,11 @@ async function viewHome() {
         <p class="small">${onlineList.map((m) => userLink(m)).join(', ') || '<span class="muted">Personne… pour l’instant.</span>'}</p>
       </div>`;
 
-  return `${intro}
+  return `${fractures.map(fractureBanner).join('')}${intro}
     ${group('Le Grimoire', 'Avant d’entrer', [
       wikiRow('#/univers/contexte', '📜', 'L’univers', 'La Fracture, les factions, les territoires de Paris : tout ce qu’il faut savoir avant de jouer.'),
+      wikiRow('#/carte', '🗺️', 'La carte de Paris', 'Les territoires des factions : cliquez sur un quartier pour y entrer.'),
+      wikiRow('#/chronologie', '⏳', 'La chronologie', 'De la Fracture à aujourd’hui : les grands événements de Paris.'),
       wikiRow('#/personnages', '🎭', 'Les personnages', 'Galerie des fiches validées, à filtrer par faction.'),
       wikiRow('#/predefinis', '🗝️', `Les prédéfinis${predefOpen ? ` <span class="pill pill-gold">${predefOpen} disponible${predefOpen > 1 ? 's' : ''}</span>` : ''}`, 'Des personnages imaginés par l’équipe, liés à l’intrigue, qui attendent leur joueur.'),
     ].join('') + hrpStart.map(forumRow).join(''))}
@@ -703,10 +719,15 @@ async function viewTopic([idStr, pageStr]) {
   // nombre de messages par auteur (affiché dans la carte de l’auteur)
   const authorIds = [...new Set(posts.map((p) => p.author_id).filter(Boolean))];
   const counts = {};
-  await Promise.all(authorIds.map(async (a) => {
-    const { count: c } = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('author_id', a);
-    counts[a] = c ?? 0;
-  }));
+  const [rewards, fractureRes] = await Promise.all([
+    authorRewards(authorIds),
+    sb.from('fracture_events').select('id,effect,status,ends_at').eq('topic_id', id).maybeSingle(),
+    ...authorIds.map(async (a) => {
+      const { count: c } = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('author_id', a);
+      counts[a] = c ?? 0;
+    }),
+  ]);
+  const fracture = fractureRes.error ? null : fractureRes.data;
 
   const isRp = topic.category.kind === 'rp';
   const myChars = isRp && canWrite() ? await myApprovedCharacters() : [];
@@ -743,6 +764,7 @@ async function viewTopic([idStr, pageStr]) {
         ${p.author?.title ? `<span class="author-title">${esc(p.author.title)}</span>` : ''}
         ${roleBadge(p.author)}
         ${p.author ? `<span class="small muted">${plural(counts[p.author_id] ?? 0, 'message', 'messages')}</span>` : ''}
+        ${p.author ? rewardLine(rewards[p.author_id]) : ''}
       </aside>`}
       <div class="post-content">
         <header class="post-meta small muted">
@@ -780,6 +802,7 @@ async function viewTopic([idStr, pageStr]) {
     <div class="page-head"><h1>${topic.pinned ? '<span class="tag tag-pin">Épinglé</span>' : ''}${topic.locked ? '<span class="tag tag-lock">🔒</span>' : ''}${esc(topic.title)}</h1>
       <p class="muted small">${plural(topic.post_count, 'message', 'messages')} · ${plural(topic.view_count, 'vue', 'vues')}</p></div>
     ${modTools}
+    ${fracture ? fractureNotice(fracture) : ''}
     ${pager(`#/t/${id}`, page, count, PAGE_SIZE_POSTS)}
     <div class="posts">${postHtml}</div>
     ${pager(`#/t/${id}`, page, count, PAGE_SIZE_POSTS)}
@@ -823,7 +846,7 @@ viewTopic.after = (root, [idStr, pageStr]) => {
           if (!ta) return;
           const who = article.dataset.who;
           const quoted = body.dataset.raw.split('\n').map((l) => `> ${l}`).join('\n');
-          ta.value += `${ta.value ? '\n\n' : ''}> **${who}** a écrit :\n${quoted}\n\n`;
+          ta.value += `${ta.value ? '\n\n' : ''}> **${who}** [a écrit](#/m/${pid}) :\n${quoted}\n\n`;
           ta.focus();
           ta.scrollIntoView({ block: 'center' });
           break;
@@ -924,7 +947,7 @@ async function viewNewTopic([slug]) {
       ${isRp ? identitySelect(myChars) : ''}
       <label>Titre<input name="title" required minlength="3" maxlength="120" placeholder="${isRp ? 'Ex. : Un matin sur les quais [Libre]' : 'Un titre clair et évocateur'}"></label>
       <label>${isRp ? 'Premier message (en jeu)' : 'Message'}</label>${editor('content')}
-      <p class="small muted">Astuce : entourez les révélations de <code>||</code> pour les masquer, par exemple <code>||la fin du chapitre||</code>.</p>
+      <p class="small muted">Astuce : entourez les révélations de <code>||</code> pour les masquer, par exemple <code>||la fin du chapitre||</code>. Écrivez <code>@pseudo</code> pour prévenir un joueur.</p>
       <div class="form-actions"><a class="btn btn-ghost" href="#/c/${esc(cat.slug)}">Annuler</a><button class="btn" type="submit">Publier le sujet</button></div>
     </form>`;
 }
@@ -1039,7 +1062,13 @@ async function viewProfile([username]) {
     sb.from('post_likes').select('post_id, posts!inner(author_id)', { count: 'exact', head: true }).eq('posts.author_id', p.id),
   ]);
   const self = state.profile?.id === p.id;
-  const chars = await q(sb.from('characters').select(CHAR_COLS).eq('owner_id', p.id).order('created_at'));
+  const [chars, mp, myBadges] = await Promise.all([
+    q(sb.from('characters').select(CHAR_COLS).eq('owner_id', p.id).order('created_at')),
+    sb.from('member_points').select('*').eq('user_id', p.id).maybeSingle(),
+    sb.from('member_badges').select('badge_id,note,awarded_at,badge:badges(id,name,icon,description,position)').eq('user_id', p.id),
+  ]);
+  const rewardsOn = !mp.error;   // false si la migration « nouveautés » n’est pas encore lancée
+  const badgeList = (myBadges.data || []).filter((b) => b.badge).sort((a, b) => a.badge.position - b.badge.position);
   const canSanction = isStaff() && !self && (isAdmin() || p.role === 'member');
   const recentHtml = recent.map((r) => `
     <li><a href="#/t/${r.topic?.id}">${esc(r.topic?.title || 'Sujet')}</a> <span class="small muted">· ${ago(r.created_at)}</span>
@@ -1057,13 +1086,16 @@ async function viewProfile([username]) {
           ${self ? `<a class="btn btn-ghost" href="#/parametres">Modifier mon profil</a>` : ''}
           ${!self && canWrite() ? `<a class="btn btn-small" href="#/messages/nouveau?a=${encodeURIComponent(p.username)}">✉ Envoyer un message</a>` : ''}
           ${canSanction ? `<button class="btn btn-small ${p.banned ? 'btn-ghost' : 'danger'}" id="ban">${p.banned ? 'Lever le bannissement' : 'Bannir'}</button>` : ''}
+          ${isStaff() && rewardsOn ? `<button class="btn btn-small btn-ghost" id="give-points">✦ Donner des points</button><button class="btn btn-small btn-ghost" id="give-badge">🏅 Décerner un badge</button>` : ''}
         </div>
       </div>
       <div class="profile-stats">
         <div><b>${postCount ?? 0}</b><span>messages</span></div>
         <div><b>${topicCount ?? 0}</b><span>sujets</span></div>
         <div><b>${likesReceived ?? 0}</b><span>applaudissements</span></div>
+        ${rewardsOn ? `<div><b>${mp.data?.points ?? 0}</b><span><a href="#/classement">points RP</a></span></div>` : ''}
       </div>
+      ${badgeList.length ? `<div class="badge-shelf">${badgeList.map((b) => `<span class="medal" title="${esc(b.badge.description || '')}${b.note ? ' — ' + esc(b.note) : ''}">${esc(b.badge.icon)} ${esc(b.badge.name)}${isStaff() ? `<button class="link medal-x" data-unbadge="${b.badge_id}" title="Retirer ce badge">×</button>` : ''}</span>`).join('')}</div>` : ''}
       ${p.bio ? `<div class="post-body bio">${renderContent(p.bio)}</div>` : ''}
     </div>
     <section class="card"><h3>Personnages ${self ? '<a class="btn btn-small btn-ghost" href="#/fiche/nouvelle">+ Nouvelle fiche</a>' : ''}</h3>
@@ -1071,6 +1103,7 @@ async function viewProfile([username]) {
     <section class="card"><h3>Messages récents</h3><ul class="latest">${recentHtml || '<li class="muted">Aucun message pour l’instant.</li>'}</ul></section>`;
 }
 viewProfile.after = (root, [username]) => {
+  wireRewardActions(root, username);
   root.querySelector('#ban')?.addEventListener('click', async () => {
     try {
       const p = await q(sb.from('profiles').select('id,banned').eq('username', username).single());
@@ -1132,7 +1165,7 @@ async function viewMembers([pageStr]) {
     q(sb.from('profiles').select(cols, { count: 'exact' }).eq('role', 'member').order('created_at').range(from, from + size - 1)),
   ]);
   const card = (m) => `<a class="member card" href="#/u/${encodeURIComponent(m.username)}">${avatar(m, 'lg')}<b>${esc(m.username)}</b>${m.title ? `<span class="author-title small">${esc(m.title)}</span>` : ''}${roleBadge(m)}</a>`;
-  return `<div class="page-head"><h1>Les expéditionnaires</h1><p class="muted">${plural((count ?? 0) + staff.length, 'membre', 'membres')}</p></div>
+  return `<div class="page-head"><div><h1>Les expéditionnaires</h1><p class="muted">${plural((count ?? 0) + staff.length, 'membre', 'membres')}</p></div><a class="btn btn-ghost" href="#/classement">🏅 Tableau d’honneur</a></div>
     ${staff.length ? `<h2 class="section-title">L’équipe</h2><div class="members">${staff.map(card).join('')}</div><h2 class="section-title">Membres</h2>` : ''}
     <div class="members">${members.map(card).join('') || '<p class="muted">Aucun membre pour l’instant.</p>'}</div>
     ${pager('#/membres', page, count, size)}`;
@@ -1164,7 +1197,8 @@ async function viewModeration([tab = 'fiches']) {
   if (!isStaff()) return `<div class="card empty"><h2>Accès réservé</h2><p>Cette page est réservée à l’équipe de modération.</p></div>`;
   setTitle('Modération');
   const tabs = [['fiches', 'Fiches à valider'], ['signalements', 'Signalements'], ['membres', 'Membres'], ...(isAdmin() ? [['categories', 'Catégories']] : [])];
-  const tabsHtml = `<nav class="tabs">${tabs.map(([k, l]) => `<a href="#/moderation/${k}" class="${k === tab ? 'active' : ''}">${l}</a>`).join('')}</nav>`;
+  const tabsHtml = `<nav class="tabs">${tabs.map(([k, l]) => `<a href="#/moderation/${k}" class="${k === tab ? 'active' : ''}">${l}</a>`).join('')}
+    <a href="#/fractures">⚡ Fractures</a><a href="#/classement">🏅 Points & badges</a><a href="#/chronologie">⏳ Chronologie</a></nav>`;
   let body = '';
 
   if (tab === 'fiches') {
@@ -1305,7 +1339,7 @@ async function viewCharacters([faction]) {
   const tabs = [['', 'Tous'], ...FACTION_LIST.map((f) => [f.value, `${f.icon} ${f.value.replace('Musiciens — ', '')}`])].map(([v, l]) =>
     `<a href="#/personnages${v ? '/' + encodeURIComponent(v) : ''}" class="${(faction || '') === v ? 'active' : ''}">${esc(l)}</a>`).join('');
   return `<div class="page-head"><div><h1>Les personnages</h1><p class="muted">Ceux qui arpentent les ruines de Paris après la Fracture.</p></div>
-      <span><a class="btn btn-ghost" href="#/predefinis">🗝️ Prédéfinis</a> ${canWrite() ? '<a class="btn" href="#/fiche/nouvelle">✒ Créer un personnage</a>' : ''}</span></div>
+      <span><a class="btn btn-ghost" href="#/bottin">📇 Bottin des avatars</a> <a class="btn btn-ghost" href="#/predefinis">🗝️ Prédéfinis</a> ${canWrite() ? '<a class="btn" href="#/fiche/nouvelle">✒ Créer un personnage</a>' : ''}</span></div>
     ${mine.length ? `<h2 class="section-title">Mes fiches en cours</h2><div class="char-grid">${mine.map(charCard).join('')}</div>` : ''}
     <nav class="tabs">${tabs}</nav>
     <div class="char-grid">${chars.map(charCard).join('') || '<div class="card empty">Aucun personnage validé ici pour l’instant.</div>'}</div>`;
@@ -1315,11 +1349,13 @@ async function viewCharacter([idStr]) {
   const c = await q(sb.from('characters').select('*,owner:profiles!characters_owner_id_fkey(username,role,avatar_url)').eq('id', Number(idStr)).maybeSingle());
   if (!c) return `<div class="card empty"><h2>Personnage introuvable</h2><p>Il n’existe pas, ou sa fiche n’est pas encore publique.</p></div>`;
   setTitle(c.name);
-  const [{ count: rpCount }, recent] = await Promise.all([
+  const [{ count: rpCount }, recent, linksRes] = await Promise.all([
     sb.from('posts').select('id', { count: 'exact', head: true }).eq('character_id', c.id),
     q(sb.from('posts').select('id,created_at,topic:topics(id,title)').eq('character_id', c.id).order('created_at', { ascending: false }).limit(8)),
+    sb.from('character_links').select(LINK_COLS).or(`character_id.eq.${c.id},target_id.eq.${c.id}`),
   ]);
   const mine = state.profile?.id === c.owner_id;
+  const linksHtml = linksRes.error ? '' : await renderCharacterLinks(c, linksRes.data || [], mine);
   const section = (title, text) => (text ? `<section class="fiche-section"><h3>${title}</h3><div class="post-body">${renderContent(text)}</div></section>` : '');
   const ownerActions = mine && canWrite() ? `
     <a class="btn btn-small btn-ghost" href="#/fiche/${c.id}/modifier">Modifier</a>
@@ -1355,17 +1391,20 @@ async function viewCharacter([idStr]) {
         <div><dt>Occupation</dt><dd>${esc(c.occupation || '—')}</dd></div>
         <div><dt>Joué par</dt><dd>${userLink(c.owner)}</dd></div>
         <div><dt>Messages en jeu</dt><dd>${rpCount ?? 0}</dd></div>
+        ${c.faceclaim ? `<div><dt>Visage</dt><dd><a href="#/bottin?q=${encodeURIComponent(c.faceclaim)}">${esc(c.faceclaim)}</a></dd></div>` : ''}
       </dl>
       ${section('Apparence', c.appearance)}
       ${section('Caractère', c.personality)}
       ${section('Histoire', c.history)}
       ${section('Capacités', c.abilities)}
     </article>
+    ${linksHtml}
     ${staffActions}
     <section class="card"><h3>Dernières apparitions</h3><ul class="latest">${recent.map((r) => `<li><a href="#/t/${r.topic?.id}">${esc(r.topic?.title || 'Sujet')}</a> <span class="small muted">· ${ago(r.created_at)}</span></li>`).join('') || '<li class="muted">Pas encore entré en scène.</li>'}</ul></section>`;
 }
 viewCharacter.after = (root, [idStr]) => {
   const id = Number(idStr);
+  wireCharacterLinks(root, id);
   root.querySelectorAll('[data-st]').forEach((b) => b.addEventListener('click', async () => {
     const row = { status: b.dataset.st };
     const note = root.querySelector('#validate textarea');
@@ -1408,6 +1447,7 @@ async function viewCharacterForm([idStr]) {
         <label>Occupation<input name="occupation" maxlength="80" value="${esc(c.occupation || '')}" placeholder="Ex. : forgeronne, cartographe…"></label>
       </div>
       <label>Image du personnage <span class="muted">(une illustration dont vous avez les droits, ou une création à vous)</span></label>${imagePicker(c.avatar_url, c.name)}
+      <label>Visage <span class="muted">(pour le <a href="#/bottin" target="_blank">bottin des avatars</a> : la personne, l’œuvre ou l’artiste dont l’image est tirée, ou « Création originale »)</span><input name="faceclaim" maxlength="80" value="${esc(c.faceclaim || '')}" placeholder="Ex. : Création originale" list="faceclaim-list" autocomplete="off"><datalist id="faceclaim-list"></datalist><span class="small" data-faceclaim-status></span></label>
       <label>Citation<input name="quote" maxlength="200" value="${esc(c.quote || '')}" placeholder="Une phrase qui le résume"></label>
       ${area('appearance', 'Apparence', 6000, 5, 'Taille, visage, tenue, signes distinctifs…')}
       ${area('personality', 'Caractère', 6000, 5, 'Qualités, défauts, peurs, ce qui le fait avancer…')}
@@ -1425,12 +1465,15 @@ viewCharacterForm.after = (root, [idStr]) => {
   wireImagePicker(root, 'perso');
   const f = root.querySelector('#char-form');
   if (!f) return;
+  wireFaceclaimCheck(f, idStr ? Number(idStr) : null);
   let mode = 'save';
   f.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => { mode = b.dataset.mode; }));
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const v = (n) => f[n].value.trim() || null;
     const row = { name: f.name.value.trim(), age: f.age.value === '' ? null : Number(f.age.value), faction: f.faction.value, occupation: v('occupation'), avatar_url: null, quote: v('quote'), appearance: v('appearance'), personality: v('personality'), history: v('history'), abilities: v('abilities') };
+    // « Visage » : envoyé seulement s’il est rempli ou s’il existait déjà (le forum marche aussi sans la migration)
+    if (v('faceclaim') || f.faceclaim.defaultValue) row.faceclaim = v('faceclaim');
     if (mode === 'submit') row.status = 'pending';
     try {
       row.avatar_url = await validImageOrNull(f);
@@ -1452,6 +1495,12 @@ async function viewWikiIndex() {
   const sections = [...new Set(pages.map((p) => p.section))];
   return `<div class="page-head"><div><h1>L’univers du forum</h1><p class="muted">Contexte, lieux, guides et règles du jeu de rôle.</p></div>
       ${isStaff() ? '<a class="btn" href="#/nouvelle-page">+ Nouvelle page</a>' : ''}</div>
+    <div class="universe-tiles">
+      <a class="card universe-tile" href="#/carte"><span>🗺️</span><b>Carte de Paris</b><em>Les territoires des factions</em></a>
+      <a class="card universe-tile" href="#/chronologie"><span>⏳</span><b>Chronologie</b><em>Les grands événements depuis la Fracture</em></a>
+      <a class="card universe-tile" href="#/fractures"><span>⚡</span><b>Zones de fracture</b><em>Les événements surprises du Narrateur</em></a>
+      <a class="card universe-tile" href="#/bottin"><span>📇</span><b>Bottin des avatars</b><em>Quel visage est déjà pris ?</em></a>
+    </div>
     ${sections.map((sec) => `<h2 class="section-title">${esc(sec)}</h2>
       <div class="card cat-list">${pages.filter((p) => p.section === sec).map((p) => `
         <a class="cat-row wiki-row" href="#/univers/${esc(p.slug)}"><span class="cat-icon">❦</span>
@@ -1524,12 +1573,15 @@ viewWikiEdit.after = (root, [slug]) => {
 // ---------------------------------------------------------------------
 async function refreshUnread() {
   if (!state.profile) return;
-  const { data } = await sb.rpc('unread_count');
-  state.unread = data || 0;
+  const [{ data }, notif] = await Promise.all([sb.rpc('unread_count'), sb.rpc('notif_count')]);
+  const n = notif.error ? 0 : notif.data || 0;   // 0 si la migration « nouveautés » n’est pas encore lancée
+  state.unread = (data || 0) + n;
   const el = document.getElementById('unread-count');
   if (el) el.innerHTML = data ? ` <span class="pill">${data}</span>` : '';
+  const bell = document.getElementById('notif-count');
+  if (bell) bell.innerHTML = n ? ` <span class="pill">${n}</span>` : '';
   const base = document.title.replace(/^\(\d+\) /, '');
-  document.title = data ? `(${data}) ${base}` : base;
+  document.title = state.unread ? `(${state.unread}) ${base}` : base;
 }
 
 async function viewInbox() {
@@ -1867,6 +1919,614 @@ viewPredefForm.after = (root, [idStr]) => {
       go(`#/predefini/${saved.id}`);
     } catch (err) { fail(err); }
   });
+};
+
+// ---------------------------------------------------------------------
+//  Nouveautés : points & badges, fractures, liens, notifications, carte, chronologie, bottin
+//  (nécessite supabase/migration-nouveautes.sql ; sans elle, ces pages l’indiquent poliment)
+// ---------------------------------------------------------------------
+const likeEsc = (s) => s.replace(/[%_\\]/g, '\\$&');
+const safeHash = (u) => (typeof u === 'string' && u.startsWith('#/') ? u : '#/');
+const migrationMissing = (what) => `<div class="card empty"><h2>${what} arrive bientôt</h2>
+  <p>L’équipe doit d’abord lancer une fois le script <code>supabase/migration-nouveautes.sql</code> dans Supabase (SQL Editor).</p><p><a href="#/">Retour à l’accueil</a></p></div>`;
+const slugify = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || `badge-${Date.now()}`;
+
+// ---- Points & badges -------------------------------------------------
+const POINT_RULES = [
+  ['Message en jeu (zone RP)', 10], ['Message hors-jeu', 2], ['Applaudissement reçu', 1],
+  ['Fiche de personnage validée', 25], ['Participation à une zone de fracture', 15], ['Récompense de l’équipe', 'variable'],
+];
+const BADGE_RULES = { rp_posts: 'messages en jeu', posts: 'messages (RP + HRP)', likes: 'applaudissements reçus', points: 'points', characters: 'personnages validés', fractures: 'zones de fracture traversées' };
+
+async function authorRewards(ids) {
+  const out = {};
+  if (!ids.length) return out;
+  const [pts, bdg] = await Promise.all([
+    sb.from('member_points').select('user_id,points').in('user_id', ids),
+    sb.from('member_badges').select('user_id,badge:badges(icon,name,position)').in('user_id', ids),
+  ]);
+  if (pts.error) return out;
+  ids.forEach((id) => { out[id] = { points: 0, badges: [] }; });
+  pts.data.forEach((r) => { out[r.user_id].points = r.points; });
+  (bdg.data || []).forEach((r) => { if (r.badge && out[r.user_id]) out[r.user_id].badges.push(r.badge); });
+  Object.values(out).forEach((r) => r.badges.sort((a, b) => a.position - b.position));
+  return out;
+}
+const rewardLine = (r) => (r ? `<span class="reward-line small"><span title="Points RP">✦ ${r.points} pts</span>${r.badges.slice(-4).map((b) => `<span title="${esc(b.name)}">${esc(b.icon)}</span>`).join('')}</span>` : '');
+
+function wireRewardActions(root, username) {
+  root.querySelector('#give-points')?.addEventListener('click', () => {
+    const m = modal(`Donner des points à ${username}`, `<form>
+      <label>Nombre de points <span class="muted">(négatif pour en retirer)</span><input name="amount" type="number" min="-1000" max="1000" value="20" required></label>
+      <label>Raison <span class="muted">(le membre la verra)</span><input name="reason" maxlength="150" placeholder="Ex. : Superbe RP pendant l’événement"></label>
+      <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Annuler</button><button class="btn">Donner</button></div></form>`);
+    m.querySelector('form').onsubmit = async (ev) => {
+      ev.preventDefault();
+      try {
+        await q(sb.rpc('award_points', { p_username: username, p_amount: Number(ev.target.amount.value), p_reason: ev.target.reason.value.trim() }));
+        m.remove(); toast('Points attribués.', 'ok'); router();
+      } catch (err) { fail(err); }
+    };
+  });
+  root.querySelector('#give-badge')?.addEventListener('click', async () => {
+    try {
+      const badges = await q(sb.from('badges').select('id,name,icon,rule').order('position'));
+      const opts = (manual) => badges.filter((b) => !b.rule === manual).map((b) => `<option value="${b.id}">${esc(b.icon)} ${esc(b.name)}</option>`).join('');
+      const m = modal(`Décerner un badge à ${username}`, `<form>
+        <label>Badge<select name="badge" required><optgroup label="Badges de l’équipe">${opts(true)}</optgroup><optgroup label="Badges automatiques">${opts(false)}</optgroup></select></label>
+        <label>Mot pour le membre <span class="muted">(facultatif)</span><input name="note" maxlength="200" placeholder="Ex. : Pour ton RP du bal masqué"></label>
+        <p class="small muted">Créez d’autres badges depuis le <a href="#/classement">tableau d’honneur</a>.</p>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Annuler</button><button class="btn">Décerner</button></div></form>`);
+      m.querySelector('form').onsubmit = async (ev) => {
+        ev.preventDefault();
+        try {
+          await q(sb.rpc('award_badge', { p_username: username, p_badge: Number(ev.target.badge.value), p_note: ev.target.note.value.trim() || null }));
+          m.remove(); toast('Badge décerné !', 'ok'); router();
+        } catch (err) { fail(err); }
+      };
+    } catch (err) { fail(err); }
+  });
+  root.querySelectorAll('[data-unbadge]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Retirer ce badge ? (Un badge automatique reviendra à la prochaine activité du membre s’il le mérite toujours.)')) return;
+    try {
+      const p = await q(sb.from('profiles').select('id').eq('username', username).single());
+      await q(sb.from('member_badges').delete().eq('user_id', p.id).eq('badge_id', Number(b.dataset.unbadge)));
+      toast('Badge retiré.', 'ok'); router();
+    } catch (err) { fail(err); }
+  }));
+}
+
+async function viewHonor() {
+  setTitle('Tableau d’honneur');
+  const [top, badges, owned] = await Promise.all([
+    sb.from('member_points').select('points,rp_posts,user_id,profile:profiles(username,role,avatar_url,banned)').gt('points', 0).order('points', { ascending: false }).limit(25),
+    sb.from('badges').select('*').order('position'),
+    sb.from('member_badges').select('badge_id').limit(5000),
+  ]);
+  if (top.error || badges.error) return migrationMissing('Le tableau d’honneur');
+  const holders = {};
+  (owned.data || []).forEach((r) => { holders[r.badge_id] = (holders[r.badge_id] || 0) + 1; });
+  state.badges = badges.data;
+  const rows = top.data.filter((r) => r.profile && !r.profile.banned).map((r, i) => `
+    <tr><td class="rank rank-${i + 1}">${i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</td>
+      <td><span class="honor-user">${avatar(r.profile, 'xs')}${userLink(r.profile)}</span></td>
+      <td class="small muted">${plural(r.rp_posts, 'message RP', 'messages RP')}</td><td><b>${r.points}</b> pts</td></tr>`).join('');
+  const medal = (b) => `
+    <div class="card medal-card">
+      <span class="medal-icon">${esc(b.icon)}</span>
+      <b>${esc(b.name)}</b>
+      <span class="small muted">${esc(b.description || '')}</span>
+      <span class="small">${b.rule ? `Automatique : ${b.threshold} ${BADGE_RULES[b.rule]}` : 'Décerné par l’équipe'} · ${plural(holders[b.id] || 0, 'membre', 'membres')}</span>
+      ${isStaff() ? `<span class="medal-tools"><button class="link small" data-edit-badge="${b.id}">Modifier</button><button class="link small danger" data-del-badge="${b.id}">Supprimer</button></span>` : ''}
+    </div>`;
+  return `<div class="page-head"><div><h1>Tableau d’honneur</h1><p class="muted">Chaque message fait vivre Paris. Les points récompensent l’activité RP, les badges les grands moments.</p></div>
+      ${isStaff() ? '<span><button class="btn btn-ghost" id="recompute">↻ Recalculer les points</button> <button class="btn" id="new-badge">+ Nouveau badge</button></span>' : ''}</div>
+    <div class="layout">
+      <section class="card"><h3>Les plus actifs</h3>
+        ${rows ? `<table class="table honor-table"><tbody>${rows}</tbody></table>` : '<p class="muted">Personne n’a encore de points. À vos plumes !</p>'}</section>
+      <aside><div class="card side"><h3>Le barème</h3><ul class="latest">${POINT_RULES.map(([l, n]) => `<li><span>${l} <b class="gold">${typeof n === 'number' ? '+' + n : n}</b></span></li>`).join('')}</ul>
+        <p class="small muted">L’équipe peut aussi donner des points ou un badge depuis le profil d’un membre.</p></div></aside>
+    </div>
+    <h2 class="section-title">Les badges</h2>
+    <div class="medal-grid">${badges.data.map(medal).join('') || '<p class="muted">Aucun badge.</p>'}</div>`;
+}
+viewHonor.after = (root) => {
+  const badgeModal = (b = {}) => {
+    const m = modal(b.id ? 'Modifier le badge' : 'Nouveau badge', `<form>
+      <div class="form-grid">
+        <label>Nom<input name="name" required minlength="2" maxlength="60" value="${esc(b.name || '')}"></label>
+        <label>Icône <span class="muted">(un émoji)</span><input name="icon" required maxlength="8" value="${esc(b.icon || '🏅')}"></label>
+      </div>
+      <label>Description<input name="description" maxlength="300" value="${esc(b.description || '')}"></label>
+      <div class="form-grid">
+        <label>Attribution<select name="rule"><option value="">Décerné à la main par l’équipe</option>${Object.entries(BADGE_RULES).map(([k, l]) => `<option value="${k}" ${b.rule === k ? 'selected' : ''}>Automatique : nombre de ${l}</option>`).join('')}</select></label>
+        <label>Seuil <span class="muted">(badge automatique)</span><input name="threshold" type="number" min="0" value="${b.threshold ?? ''}"></label>
+        <label>Ordre d’affichage<input name="position" type="number" value="${b.position ?? 50}"></label>
+      </div>
+      <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Annuler</button><button class="btn">Enregistrer</button></div></form>`);
+    m.querySelector('form').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      const row = { name: f.name.value.trim(), icon: f.icon.value.trim(), description: f.description.value.trim() || null, rule: f.rule.value || null, threshold: f.rule.value && f.threshold.value !== '' ? Number(f.threshold.value) : null, position: Number(f.position.value) || 0 };
+      if (row.rule && row.threshold == null) return toast('Indiquez un seuil pour un badge automatique.', 'error');
+      try {
+        if (b.id) await q(sb.from('badges').update(row).eq('id', b.id));
+        else await q(sb.from('badges').insert({ ...row, slug: `${slugify(row.name)}-${Date.now().toString(36)}` }));
+        m.remove(); toast('Badge enregistré.' + (row.rule ? ' Les membres le recevront à leur prochaine activité (ou cliquez « Recalculer »).' : ''), 'ok'); router();
+      } catch (err) { fail(err); }
+    };
+  };
+  root.querySelector('#new-badge')?.addEventListener('click', () => badgeModal());
+  root.querySelectorAll('[data-edit-badge]').forEach((b) => b.addEventListener('click', () => badgeModal(state.badges.find((x) => x.id === Number(b.dataset.editBadge)))));
+  root.querySelectorAll('[data-del-badge]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Supprimer ce badge ? Il sera retiré à tous les membres qui l’ont.')) return;
+    try { await q(sb.from('badges').delete().eq('id', Number(b.dataset.delBadge))); router(); } catch (err) { fail(err); }
+  }));
+  root.querySelector('#recompute')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try { await q(sb.rpc('recompute_points')); toast('Points recalculés à partir de tous les messages.', 'ok'); router(); } catch (err) { fail(err); e.target.disabled = false; }
+  });
+};
+
+// ---- Zones de fracture ----------------------------------------------
+async function activeFractures() {
+  await sb.rpc('close_expired_fractures');
+  const { data, error } = await sb.from('fracture_events').select('id,title,effect,ends_at,topic_id,category:categories(name,slug,icon)')
+    .eq('status', 'active').gt('ends_at', new Date().toISOString()).order('starts_at', { ascending: false });
+  return error ? [] : data;
+}
+const fractureBanner = (f) => `
+  <a class="fracture-banner" href="${f.topic_id ? `#/t/${f.topic_id}` : '#/fractures'}">
+    <span class="fracture-bolt" aria-hidden="true">⚡</span>
+    <span class="fracture-text"><b>Zone de fracture ouverte : ${esc(f.effect)}</b>
+      <span class="small">${esc(f.category?.name || 'Quelque part dans Paris')} · se referme ${ago(f.ends_at)} · +15 points et le badge ⚡ Témoin de la Fracture pour chaque participant</span></span>
+    <span class="btn btn-small">Entrer</span>
+  </a>`;
+function fractureNotice(f) {
+  const open = f.status === 'active' && new Date(f.ends_at) > Date.now();
+  return `<div class="card notice fracture-notice">⚡ <b>Zone de fracture ${open ? 'ouverte' : 'refermée'} : ${esc(f.effect)}</b>
+    · ${open ? `se referme ${ago(f.ends_at)}. Chaque personnage qui y entre rapporte 15 points et le badge ⚡ Témoin de la Fracture à son joueur.` : 'cet événement est terminé.'}
+    <a href="#/fractures">Toutes les fractures</a></div>`;
+}
+
+async function viewFractures() {
+  setTitle('Zones de fracture');
+  await sb.rpc('close_expired_fractures');
+  const { data, error } = await sb.from('fracture_events').select('*,category:categories(name,slug,icon),topic:topics(id,title,post_count)').order('starts_at', { ascending: false }).limit(60);
+  if (error) return migrationMissing('Les zones de fracture');
+  const now = Date.now();
+  const active = data.filter((f) => f.status === 'active' && new Date(f.ends_at) > now);
+  const past = data.filter((f) => !active.includes(f));
+  let staffForm = '';
+  if (isStaff()) {
+    const [cats, effects] = await Promise.all([q(sb.from('categories').select('id,name,icon').eq('kind', 'rp').order('position')), q(sb.rpc('fracture_effects'))]);
+    staffForm = `
+    <form class="card form staff-box" id="fracture-form">
+      <h3>🎭 Le Narrateur ouvre une fracture</h3>
+      <p class="small muted">Laissez « Au hasard » et le territoire comme l’effet seront tirés au sort. Un sujet épinglé est ouvert au nom du Narrateur, et tous les membres reçoivent une notification.</p>
+      <div class="form-grid">
+        <label>Territoire<select name="category"><option value="">🎲 Au hasard</option>${cats.map((c) => `<option value="${c.id}">${esc(c.icon || '')} ${esc(c.name)}</option>`).join('')}</select></label>
+        <label>Effet<select name="effect"><option value="">🎲 Au hasard</option>${effects.map((e) => `<option value="${esc(e.name)}" title="${esc(e.description)}">${esc(e.name)}</option>`).join('')}<option value="__autre">✎ Autre (je l’écris)…</option></select></label>
+        <label data-custom hidden>Effet personnalisé<input name="custom" maxlength="80" placeholder="Ex. : Les horloges fondent"></label>
+        <label>Durée<select name="hours"><option value="24">24 heures</option><option value="48">2 jours</option><option value="72" selected>3 jours</option><option value="168">1 semaine</option><option value="336">2 semaines</option></select></label>
+        <label>Titre du sujet <span class="muted">(facultatif)</span><input name="title" maxlength="120" placeholder="Généré automatiquement si vide"></label>
+      </div>
+      <label>Texte du Narrateur <span class="muted">(facultatif, ajouté au message d’ouverture)</span></label>
+      ${editor('content', '', 'Décrivez ce qui arrive aux habitants du quartier…').replace('required ', '')}
+      <div class="form-actions"><button type="button" class="btn btn-ghost" id="fracture-surprise">🎲 Fracture surprise (tout au hasard)</button><button class="btn" type="submit">⚡ Ouvrir la fracture</button></div>
+    </form>`;
+  }
+  const card = (f, open) => `
+    <div class="card fracture-card ${open ? 'open' : ''} fac fac-${TERRITORY_FAC[f.category?.slug] || 'neutre'}">
+      <div class="fracture-head"><span class="fracture-bolt" aria-hidden="true">${open ? '⚡' : '·'}</span>
+        <div><b>${esc(f.effect)}</b> <span class="small muted">· ${esc(f.category?.name || 'Territoire disparu')}</span>
+          <p class="small muted">${open ? `Ouverte ${ago(f.starts_at)} · se referme ${ago(f.ends_at)}` : `Du ${fmtDay(f.starts_at)} au ${fmtDay(f.closed_at || f.ends_at)}`}${f.topic ? ` · ${plural(Math.max(f.topic.post_count - 1, 0), 'réponse', 'réponses')}` : ''}</p></div>
+        <span class="fracture-actions">
+          ${f.topic ? `<a class="btn btn-small ${open ? '' : 'btn-ghost'}" href="#/t/${f.topic.id}">${open ? 'Entrer dans la faille' : 'Relire'}</a>` : ''}
+          ${isStaff() && open ? `<button class="btn btn-small btn-ghost" data-close-fracture="${f.id}">Refermer</button>` : ''}
+          ${isStaff() && !open ? `<a class="btn btn-small btn-ghost" href="#/chronologie?ajouter=1&icone=${encodeURIComponent('⚡')}&titre=${encodeURIComponent(f.effect + ' — ' + (f.category?.name || '').split(' — ')[0])}&sujet=${f.topic_id || ''}">Inscrire dans la chronologie</a>` : ''}
+        </span>
+      </div>
+      ${f.description ? `<div class="post-body small">${renderContent(f.description)}</div>` : ''}
+    </div>`;
+  return `<div class="page-head"><div><h1>Zones de fracture</h1><p class="muted">Gravité instable, pluie de lettres, créatures inachevées… La Fracture n’est pas finie : elle revient, par endroits, sans prévenir.</p></div><a class="btn btn-ghost" href="#/carte">🗺️ Voir sur la carte</a></div>
+    ${staffForm}
+    <h2 class="section-title">Ouvertes en ce moment</h2>
+    ${active.map((f) => card(f, true)).join('') || '<div class="card empty small">Aucune fracture ouverte. Paris retient son souffle… pour l’instant.</div>'}
+    <h2 class="section-title">Fractures refermées</h2>
+    ${past.map((f) => card(f, false)).join('') || '<p class="muted small">Aucune pour l’instant.</p>'}`;
+}
+viewFractures.after = (root) => {
+  wireEditor(root);
+  const f = root.querySelector('#fracture-form');
+  const launch = async (args, btn) => {
+    if (!confirm('Ouvrir cette fracture ? Tous les membres vont recevoir une notification.')) return;
+    btn.disabled = true;
+    try {
+      const eid = await q(sb.rpc('launch_fracture', args));
+      toast('⚡ La fracture est ouverte !', 'ok');
+      const { data } = await sb.from('fracture_events').select('topic_id').eq('id', eid).maybeSingle();
+      go(data?.topic_id ? `#/t/${data.topic_id}` : '#/fractures');
+    } catch (err) { fail(err); btn.disabled = false; }
+  };
+  if (f) {
+    f.effect.addEventListener('change', () => { f.querySelector('[data-custom]').hidden = f.effect.value !== '__autre'; });
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const effect = f.effect.value === '__autre' ? f.custom.value.trim() : f.effect.value;
+      if (f.effect.value === '__autre' && !effect) return toast('Écrivez l’effet de la fracture.', 'error');
+      launch({ p_category: f.category.value ? Number(f.category.value) : null, p_effect: effect || null, p_title: f.title.value.trim() || null, p_content: f.content.value.trim() || null, p_hours: Number(f.hours.value) }, f.querySelector('button[type=submit]'));
+    });
+    root.querySelector('#fracture-surprise').addEventListener('click', (e) => launch({ p_hours: Number(f.hours.value) }, e.target));
+  }
+  root.querySelectorAll('[data-close-fracture]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Refermer cette fracture maintenant ? Le sujet reste lisible.')) return;
+    try { await q(sb.rpc('close_fracture', { p_id: Number(b.dataset.closeFracture) })); toast('La fracture se referme.', 'ok'); router(); } catch (err) { fail(err); }
+  }));
+};
+
+// ---- Liens entre personnages ----------------------------------------
+const LINK_KINDS = { famille: ['👪', 'Famille'], ami: ['🤝', 'Amitié'], amour: ['❤️', 'Amour'], allie: ['🛡️', 'Alliance'], rival: ['⚔️', 'Rivalité'], ennemi: ['💢', 'Inimitié'], mentor: ['🕯️', 'Mentor & élève'], autre: ['✦', 'Autres liens'] };
+const LINK_COLS = 'id,kind,description,target_description,status,character_id,target_id,src:characters!character_links_character_id_fkey(id,name,avatar_url,faction),tgt:characters!character_links_target_id_fkey(id,name,avatar_url,faction)';
+
+async function renderCharacterLinks(c, links, mine) {
+  const me = state.profile;
+  const view = links.map((l) => {
+    const outgoing = l.character_id === c.id;
+    return { ...l, outgoing, other: outgoing ? l.tgt : l.src, text: outgoing ? l.description : l.target_description };
+  }).filter((l) => l.other);
+  const accepted = view.filter((l) => l.status === 'accepted');
+  const pending = mine ? view.filter((l) => l.status === 'pending') : [];
+  let myChars = [];
+  if (me && canWrite() && !mine && c.status === 'approved') {
+    const linked = new Set(view.map((l) => l.other.id));
+    myChars = (await q(sb.from('characters').select('id,name').eq('owner_id', me.id).neq('status', 'archived').order('name'))).filter((x) => !linked.has(x.id));
+  }
+  const canPropose = !!me && canWrite() && (mine ? c.status !== 'archived' : myChars.length > 0);
+  state.linkCtx = { mine, myChars };
+  if (!accepted.length && !pending.length && !canPropose) return '';
+  const item = (l) => `<div class="link-item ${facClass(l.other.faction)}">${charAvatar(l.other, 'sm')}<div><a href="#/perso/${l.other.id}">${esc(l.other.name)}</a>${l.text ? `<span class="small muted">${esc(l.text)}</span>` : ''}</div>${mine ? `<button class="link small danger link-x" data-unlink="${l.id}" title="Retirer ce lien">×</button>` : ''}</div>`;
+  const pend = pending.map((l) => (l.outgoing
+    ? `<div class="link-pending small">⏳ Lien « ${LINK_KINDS[l.kind][1]} » proposé à <a href="#/perso/${l.other.id}">${esc(l.other.name)}</a> : en attente de son joueur. <button class="link small" data-unlink="${l.id}">Annuler</button></div>`
+    : `<div class="link-pending small incoming">🔗 <a href="#/perso/${l.other.id}">${esc(l.other.name)}</a> propose un lien « ${LINK_KINDS[l.kind][1]} »${l.description ? ` : <em>${esc(l.description)}</em>` : ''}
+        <span><button class="btn btn-small" data-accept-link="${l.id}" data-other="${esc(l.other.name)}">Accepter</button> <button class="btn btn-small btn-ghost" data-unlink="${l.id}" data-refuse>Refuser</button></span></div>`)).join('');
+  const groups = Object.keys(LINK_KINDS).map((k) => [k, accepted.filter((l) => l.kind === k)]).filter(([, ls]) => ls.length);
+  return `<section class="card char-links" id="liens">
+      <h3>Liens ${canPropose ? '<button class="btn btn-small btn-ghost" id="propose-link">+ Proposer un lien</button>' : ''}</h3>
+      ${pend}
+      ${groups.map(([k, ls]) => `<div class="link-group"><h4>${LINK_KINDS[k][0]} ${LINK_KINDS[k][1]}</h4><div class="link-list">${ls.map(item).join('')}</div></div>`).join('') || '<p class="muted small">Aucun lien pour l’instant.</p>'}
+    </section>`;
+}
+function wireCharacterLinks(root, id) {
+  const ctx = state.linkCtx || {};
+  root.querySelector('#propose-link')?.addEventListener('click', () => {
+    const kinds = Object.entries(LINK_KINDS).map(([k, [i, l]]) => `<option value="${k}">${i} ${l}</option>`).join('');
+    const m = modal('Proposer un lien', `<form>
+      ${ctx.mine ? '<label>Avec quel personnage ?<input name="other" required list="link-chars" placeholder="Tapez le début de son nom…" autocomplete="off"></label><datalist id="link-chars"></datalist>'
+        : `<label>Mon personnage<select name="mine">${ctx.myChars.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>`}
+      <label>Type de lien<select name="kind">${kinds}</select></label>
+      <label>En quelques mots <span class="muted">(du point de vue de votre personnage)</span><input name="description" maxlength="300" placeholder="Ex. : Son frère aîné, perdu de vue depuis la Fracture"></label>
+      <p class="small muted">Le joueur de l’autre personnage reçoit une notification : le lien apparaît sur les deux fiches quand il l’accepte.</p>
+      <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Annuler</button><button class="btn">Proposer</button></div></form>`);
+    const form = m.querySelector('form');
+    if (ctx.mine) {
+      let timer;
+      form.other.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+          const v = form.other.value.replace(/ · #\d+$/, '').trim();
+          if (v.length < 2) return;
+          const { data } = await sb.from('characters').select('id,name').eq('status', 'approved').neq('id', id).ilike('name', `${likeEsc(v)}%`).limit(10);
+          m.querySelector('#link-chars').innerHTML = (data || []).map((c) => `<option value="${esc(c.name)} · #${c.id}">`).join('');
+        }, 250);
+      });
+    }
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      try {
+        let row;
+        if (ctx.mine) {
+          const mm = / · #(\d+)$/.exec(form.other.value);
+          let target = mm ? Number(mm[1]) : null;
+          if (!target) {
+            const found = await q(sb.from('characters').select('id').eq('status', 'approved').neq('id', id).ilike('name', likeEsc(form.other.value.trim())).limit(2));
+            if (found.length !== 1) return toast(found.length ? 'Plusieurs personnages portent ce nom : choisissez-le dans la liste.' : 'Personnage introuvable (sa fiche doit être validée).', 'error');
+            target = found[0].id;
+          }
+          row = { character_id: id, target_id: target };
+        } else row = { character_id: Number(form.mine.value), target_id: id };
+        row.kind = form.kind.value;
+        row.description = form.description.value.trim() || null;
+        const saved = await q(sb.from('character_links').insert(row).select('status').single());
+        m.remove();
+        toast(saved.status === 'accepted' ? 'Lien ajouté.' : 'Lien proposé ! Il apparaîtra quand l’autre joueur l’aura accepté.', 'ok');
+        router();
+      } catch (err) { fail(err); }
+    };
+  });
+  root.querySelectorAll('[data-accept-link]').forEach((b) => b.addEventListener('click', () => {
+    const m = modal('Accepter le lien', `<form>
+      <label>En quelques mots <span class="muted">(ce que ${esc(b.dataset.other)} représente pour votre personnage, facultatif)</span><input name="description" maxlength="300" placeholder="Ex. : Ce peintre arrogant qu’elle respecte en secret"></label>
+      <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Annuler</button><button class="btn">Accepter le lien</button></div></form>`);
+    m.querySelector('form').onsubmit = async (ev) => {
+      ev.preventDefault();
+      try {
+        await q(sb.from('character_links').update({ status: 'accepted', target_description: ev.target.description.value.trim() || null }).eq('id', Number(b.dataset.acceptLink)));
+        m.remove(); toast('Lien accepté : il apparaît sur les deux fiches.', 'ok'); router();
+      } catch (err) { fail(err); }
+    };
+  }));
+  root.querySelectorAll('[data-unlink]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm(b.hasAttribute('data-refuse') ? 'Refuser ce lien ?' : 'Retirer ce lien des deux fiches ?')) return;
+    try { await q(sb.from('character_links').delete().eq('id', Number(b.dataset.unlink))); router(); } catch (err) { fail(err); }
+  }));
+}
+
+// ---- Bottin des avatars ---------------------------------------------
+function wireFaceclaimCheck(f, id) {
+  const input = f.faceclaim;
+  const status = f.querySelector('[data-faceclaim-status]');
+  const list = f.querySelector('#faceclaim-list');
+  if (!input) return;
+  let timer;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const v = input.value.trim();
+      status.textContent = '';
+      if (v.length < 2) return;
+      const { data, error } = await sb.from('characters').select('id,name,faceclaim').eq('status', 'approved').ilike('faceclaim', `%${likeEsc(v)}%`).limit(20);
+      if (error) return;
+      list.innerHTML = [...new Set(data.map((d) => d.faceclaim))].map((x) => `<option value="${esc(x)}">`).join('');
+      const same = data.filter((d) => d.faceclaim.toLowerCase() === v.toLowerCase() && d.id !== id);
+      if (/^cr[ée]ation originale$/i.test(v)) return;
+      if (same.length) { status.className = 'small danger'; status.textContent = `⚠ Ce visage est déjà utilisé par ${same.map((d) => d.name).join(', ')}.`; }
+      else { status.className = 'small ok-text'; status.textContent = '✓ Aucun personnage validé n’utilise ce visage.'; }
+    }, 300);
+  });
+}
+
+async function viewFaceclaims(_, params) {
+  setTitle('Bottin des avatars');
+  const { data, error } = await sb.from('characters').select('id,name,faction,avatar_url,faceclaim,owner:profiles!characters_owner_id_fkey(username,role)')
+    .eq('status', 'approved').not('faceclaim', 'is', null).order('faceclaim').order('name');
+  if (error) return migrationMissing('Le bottin des avatars');
+  const norm = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const uses = {};
+  data.forEach((c) => { const k = norm(c.faceclaim); uses[k] = (uses[k] || 0) + 1; });
+  const groups = {};
+  data.forEach((c) => { const l = norm(c.faceclaim).charAt(0).toUpperCase(); (groups[/[A-Z]/.test(l) ? l : '#'] ||= []).push(c); });
+  const row = (c) => {
+    const k = norm(c.faceclaim);
+    const dup = uses[k] > 1 && !/^creation originale$/.test(k);
+    return `<div class="fc-row ${facClass(c.faction)}" data-fc="${esc(k)} ${esc(norm(c.name))}">
+      ${charAvatar(c, 'sm')}
+      <b class="fc-face">${esc(c.faceclaim)}</b>
+      <span class="fc-char">→ ${charLink(c)} ${factionBadge(c.faction)}</span>
+      <span class="small muted">joué par ${userLink(c.owner)}${dup ? ' · <span class="danger">utilisé plusieurs fois</span>' : ''}</span>
+    </div>`;
+  };
+  const term = params.get('q') || '';
+  return `<div class="page-head"><div><h1>Bottin des avatars</h1><p class="muted">Quel visage est déjà pris ? Vérifiez avant de choisir l’image de votre personnage.</p></div>
+      ${canWrite() ? '<a class="btn btn-ghost" href="#/fiche/nouvelle">✒ Créer un personnage</a>' : ''}</div>
+    <div class="card fc-search"><input type="search" id="fc-filter" class="full" placeholder="Rechercher un visage ou un personnage…" value="${esc(term)}">
+      <p class="small" id="fc-result"></p>
+      <p class="small muted">Le visage se renseigne dans la fiche du personnage (champ « Visage »). ${plural(data.length, 'personnage référencé', 'personnages référencés')}.</p></div>
+    ${Object.keys(groups).sort().map((l) => `<section class="fc-group" data-letter><h2 class="section-title">${l}</h2><div class="card fc-list">${groups[l].map(row).join('')}</div></section>`).join('') || '<div class="card empty">Aucun visage renseigné pour l’instant.</div>'}`;
+}
+viewFaceclaims.after = (root) => {
+  const input = root.querySelector('#fc-filter');
+  if (!input) return;
+  const out = root.querySelector('#fc-result');
+  const apply = () => {
+    const v = input.value.trim().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    let shown = 0;
+    root.querySelectorAll('.fc-row').forEach((r) => { r.hidden = !!v && !r.dataset.fc.includes(v); if (!r.hidden) shown++; });
+    root.querySelectorAll('[data-letter]').forEach((g) => { g.hidden = ![...g.querySelectorAll('.fc-row')].some((r) => !r.hidden); });
+    out.className = 'small ' + (v.length >= 2 ? (shown ? 'danger' : 'ok-text') : '');
+    out.textContent = v.length < 2 ? '' : shown ? `${plural(shown, 'résultat', 'résultats')} : ce visage est peut-être déjà pris.` : '✓ Aucun personnage n’utilise ce visage : il est libre !';
+  };
+  input.addEventListener('input', apply);
+  apply();
+};
+
+// ---- Notifications ---------------------------------------------------
+const NOTIF = {
+  reply: (n) => ['💬', `<b>${esc(n.who)}</b> a répondu dans « ${esc(n.title)} »`],
+  mention: (n) => ['📣', `<b>${esc(n.who)}</b> vous a mentionné dans « ${esc(n.title)} »`],
+  quote: (n) => ['❝', `<b>${esc(n.who)}</b> vous a cité dans « ${esc(n.title)} »`],
+  link: (n) => ['🔗', `<b>${esc(n.who)}</b> propose un lien avec votre personnage <b>${esc(n.title)}</b>`],
+  link_ok: (n) => ['🤝', `<b>${esc(n.who)}</b> a accepté le lien avec <b>${esc(n.title)}</b>`],
+  badge: (n) => ['🏅', `Nouveau badge : <b>${esc(n.who)}</b>${n.title ? ` <span class="muted">· ${esc(n.title)}</span>` : ''}`],
+  points: (n) => ['✦', `<b>${esc(n.who)}</b> de l’équipe : ${esc(n.title)}`],
+  fracture: (n) => ['⚡', `Une fracture s’ouvre : <b>${esc(n.who)}</b> · ${esc(n.title)}`],
+  fiche: (n) => (n.title === 'approved' ? ['✅', `La fiche de <b>${esc(n.who)}</b> a été validée. Bienvenue à Paris !`] : ['✎', `La fiche de <b>${esc(n.who)}</b> est à retravailler : lisez la note de l’équipe.`]),
+};
+async function viewNotifications() {
+  const need = requireLogin(); if (need) return need;
+  setTitle('Notifications');
+  const { data, error } = await sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(100);
+  if (error) return migrationMissing('Les notifications');
+  const rows = data.map((n) => {
+    const [icon, text] = (NOTIF[n.kind] || (() => ['✦', esc(n.title || '')]))(n);
+    return `<a class="notif-row ${n.read_at ? '' : 'unread'}" href="${esc(safeHash(n.url))}"><span class="notif-icon">${icon}</span><span class="notif-text">${text}</span><span class="small muted">${ago(n.created_at)}</span></a>`;
+  }).join('');
+  return `<div class="page-head"><div><h1>Notifications</h1><p class="muted">Réponses à vos sujets RP, mentions <code>@${esc(state.profile?.username || 'pseudo')}</code>, citations, liens, badges et fractures.</p></div>
+      ${data.length ? '<button class="btn btn-ghost btn-small" id="clear-notifs">Tout effacer</button>' : ''}</div>
+    <div class="card notif-list">${rows || '<p class="empty">Rien de neuf. Paris est calme… pour l’instant.</p>'}</div>`;
+}
+viewNotifications.after = (root) => {
+  if (!state.profile) return;
+  sb.rpc('mark_notifications_read').then(refreshUnread);
+  root.querySelector('#clear-notifs')?.addEventListener('click', async () => {
+    if (!confirm('Effacer toutes vos notifications ?')) return;
+    try { await q(sb.from('notifications').delete().eq('user_id', state.profile.id)); router(); } catch (err) { fail(err); }
+  });
+};
+
+// Lien vers un message précis (#/m/123) : on ouvre la bonne page du sujet
+async function viewPostJump([idStr]) {
+  const pid = Number(idStr);
+  const post = await q(sb.from('posts').select('id,topic_id').eq('id', pid).maybeSingle());
+  if (!post) return `<div class="card empty"><h2>Message introuvable</h2><p>Il a peut-être été supprimé.</p><p><a href="#/">Retour à l’accueil</a></p></div>`;
+  const { count } = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('topic_id', post.topic_id).lt('id', pid);
+  state.anchor = `p${pid}`;
+  location.replace(`#/t/${post.topic_id}/${Math.floor((count || 0) / PAGE_SIZE_POSTS) + 1}`);
+  return '<p class="loading">Chargement…</p>';
+}
+
+// ---- Carte interactive de Paris -------------------------------------
+// Chaque zone correspond à l’adresse (slug) d’une catégorie RP. Une catégorie renommée garde sa zone tant que son adresse ne change pas.
+const MAP_ZONES = [
+  { slug: 'paris', label: 'Rues neutres', lx: 255, ly: 470,
+    shape: '<path class="map-shape" d="M150 300 C 150 175 300 92 470 84 C 650 76 820 125 880 240 C 935 345 900 470 785 532 C 650 600 390 602 255 535 C 165 488 148 395 150 300 Z"/>' },
+  { slug: 'catacombes', label: 'Catacombes', lx: 525, ly: 548,
+    shape: '<path class="map-shape map-under" d="M372 505 C 430 488 615 488 675 508 C 700 532 662 566 602 574 C 520 584 425 580 378 562 C 345 546 348 517 372 505 Z"/>' },
+  { slug: 'quartier-latin', label: 'Quartier Latin', lx: 515, ly: 446,
+    shape: '<path class="map-shape" d="M418 396 C 470 378 562 384 612 400 C 642 428 625 470 572 481 C 512 494 452 487 426 462 C 404 442 403 410 418 396 Z"/>' },
+  { slug: 'seine', label: 'La Seine', lx: 250, ly: 288, river: true,
+    shape: '<path class="map-shape map-river-hit" d="M118 362 C 220 300 300 292 382 322 S 540 382 622 342 S 760 270 902 302"/><path class="map-river" d="M118 362 C 220 300 300 292 382 322 S 540 382 622 342 S 760 270 902 302"/>' },
+  { slug: 'montmartre', label: 'Montmartre', lx: 505, ly: 178,
+    shape: '<path class="map-shape" d="M400 112 C 452 80 580 80 622 120 C 652 160 622 222 562 236 C 492 252 410 232 390 192 C 380 162 382 132 400 112 Z"/><ellipse class="map-contour" cx="506" cy="160" rx="78" ry="42"/><ellipse class="map-contour" cx="506" cy="154" rx="40" ry="20"/>' },
+  { slug: 'fractures', label: 'Fracture ouverte', lx: 752, ly: 446,
+    shape: '<path class="map-shape map-crack" d="M694 370 L737 350 L762 386 L808 376 L792 422 L828 450 L782 466 L772 512 L737 482 L698 502 L708 456 L672 432 Z"/>' },
+  { slug: 'reves', label: 'Failles oniriques', lx: 120, ly: 196,
+    shape: '<path class="map-shape map-moon" d="M150 58 A 60 60 0 1 0 150 172 A 46 46 0 1 1 150 58 Z"/>' },
+  { slug: 'evenements', label: 'Chroniques', lx: 905, ly: 606,
+    shape: '<path class="map-shape map-compass" d="M905 498 L917 538 L957 550 L917 562 L905 602 L893 562 L853 550 L893 538 Z"/><circle class="map-contour" cx="905" cy="550" r="22"/>' },
+];
+const MAP_STARS = [[40, 40], [90, 260], [60, 520], [210, 40], [330, 30], [610, 22], [760, 50], [960, 90], [940, 210], [975, 420], [40, 380], [130, 600], [700, 610], [980, 300], [20, 150], [870, 20]];
+
+async function viewMap() {
+  setTitle('Carte de Paris');
+  const [cats, fractures] = await Promise.all([q(sb.from('category_stats').select('*').eq('kind', 'rp').order('position')), activeFractures()]);
+  const bySlug = Object.fromEntries(cats.map((c) => [c.slug, c]));
+  const fractureBySlug = {};
+  fractures.forEach((f) => { if (f.category) (fractureBySlug[f.category.slug] ||= []).push(f); });
+  state.mapInfo = { bySlug, fractureBySlug };
+  const zones = MAP_ZONES.filter((z) => bySlug[z.slug]).map((z) => {
+    const c = bySlug[z.slug];
+    return `<a href="#/c/${esc(c.slug)}" class="map-zone fac fac-${TERRITORY_FAC[z.slug] || 'neutre'} ${fractureBySlug[z.slug] ? 'has-fracture' : ''}" data-slug="${esc(c.slug)}" aria-label="${esc(c.name)}">
+      <title>${esc(c.name)}</title>${z.shape}
+      <text class="map-label" x="${z.lx}" y="${z.ly}" text-anchor="middle">${esc(c.icon || '')} ${esc(z.label)}</text></a>`;
+  }).join('');
+  const markers = fractures.map((f, i) => {
+    const z = MAP_ZONES.find((x) => x.slug === f.category?.slug);
+    if (!z) return '';
+    const x = z.lx + 60 + i * 8;
+    const y = z.ly - 34;
+    return `<a href="${f.topic_id ? `#/t/${f.topic_id}` : '#/fractures'}" class="map-fracture" aria-label="Fracture : ${esc(f.effect)}"><title>⚡ ${esc(f.effect)} : cliquez pour entrer</title>
+      <circle class="map-pulse" cx="${x}" cy="${y}" r="22"/><circle class="map-pulse-core" cx="${x}" cy="${y}" r="15"/><text x="${x}" y="${y + 6}" text-anchor="middle">⚡</text></a>`;
+  }).join('');
+  const others = cats.filter((c) => !MAP_ZONES.some((z) => z.slug === c.slug));
+  return `<div class="page-head"><div><h1>Carte de Paris</h1><p class="muted">Ce qu’il reste du monde. Survolez un territoire pour le découvrir, cliquez pour y entrer.</p></div>
+      <a class="btn btn-ghost" href="#/univers/lieux">📜 Paris aujourd’hui</a></div>
+    ${fractures.map(fractureBanner).join('')}
+    <div class="map-layout">
+      <div class="card map-card">
+        <svg class="paris-map" viewBox="0 0 1000 640" aria-label="Carte des territoires de Paris">
+          <defs><radialGradient id="map-void" cx="50%" cy="50%" r="70%"><stop offset="55%" style="stop-color:var(--map-void-1)"/><stop offset="100%" style="stop-color:var(--map-void-2)"/></radialGradient></defs>
+          <rect width="1000" height="640" fill="url(#map-void)"/>
+          <g class="map-stars">${MAP_STARS.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${1 + (i % 3) * 0.6}"/>`).join('')}</g>
+          <text class="map-void-label" x="70" y="600">Le Néant</text>
+          ${zones}
+          <g class="map-deco" aria-hidden="true">
+            <ellipse class="map-island" cx="502" cy="352" rx="26" ry="9"/>
+            <text x="502" y="378" text-anchor="middle" class="map-tiny">Île de la Cité</text>
+          </g>
+          ${markers}
+          <text class="map-compass-n" x="905" y="490" text-anchor="middle">N</text>
+        </svg>
+      </div>
+      <aside class="card map-info" id="map-info" aria-live="polite">
+        <p class="muted">Survolez ou touchez un territoire de la carte pour voir ce qui s’y passe.</p>
+      </aside>
+    </div>
+    <h2 class="section-title">Tous les territoires</h2>
+    <div class="map-legend">${cats.map((c) => `<a class="legend-item fac fac-${TERRITORY_FAC[c.slug] || 'neutre'}" href="#/c/${esc(c.slug)}" data-slug="${esc(c.slug)}"><span class="legend-dot"></span>${esc(c.icon || '')} ${esc(c.name)} <b>${c.topic_count}</b>${fractureBySlug[c.slug] ? ' ⚡' : ''}</a>`).join('')}</div>
+    ${others.length ? `<p class="small muted">Les territoires ajoutés par l’équipe (${others.map((c) => esc(c.name)).join(', ')}) n’ont pas encore de place sur la carte : ils sont listés ci-dessus.</p>` : ''}`;
+}
+viewMap.after = (root) => {
+  const info = root.querySelector('#map-info');
+  if (!info) return;
+  const { bySlug, fractureBySlug } = state.mapInfo;
+  const FAC_NAME = { peintres: 'Bastion des Peintres', ecrivains: 'Territoire des Écrivains', musiciens: 'Sanctuaire des Musiciens', discordants: 'Zone instable', dreamers: 'Royaume des rêves', healers: 'Intrigues du Narrateur', neutre: 'Territoire neutre' };
+  const show = (slug) => {
+    const c = bySlug[slug];
+    if (!c) return;
+    const fk = TERRITORY_FAC[slug] || 'neutre';
+    const fr = fractureBySlug[slug] || [];
+    info.className = `card map-info fac fac-${fk}`;
+    info.innerHTML = `<span class="map-info-icon">${esc(c.icon || '✦')}</span>
+      <h3>${esc(c.name)}</h3>
+      <p class="small map-info-fac">${FAC_NAME[fk]}</p>
+      <p>${esc(c.description || '')}</p>
+      <p class="small muted">${plural(c.topic_count, 'sujet', 'sujets')} · ${plural(c.message_count, 'message', 'messages')}${c.last_activity ? ` · dernière activité ${ago(c.last_activity)}` : ''}</p>
+      ${fr.map((f) => `<p class="small fracture-inline">⚡ Fracture ouverte : <b>${esc(f.effect)}</b> (se referme ${ago(f.ends_at)})</p>`).join('')}
+      <a class="btn btn-small" href="#/c/${esc(c.slug)}">Entrer →</a>`;
+  };
+  root.querySelectorAll('.map-zone, .map-legend [data-slug]').forEach((z) => {
+    z.addEventListener('mouseenter', () => show(z.dataset.slug));
+    z.addEventListener('focus', () => show(z.dataset.slug));
+  });
+};
+
+// ---- Chronologie de Paris -------------------------------------------
+async function viewTimeline() {
+  setTitle('Chronologie');
+  const { data, error } = await sb.from('timeline_events').select('*,topic:topics(id,title)').order('position').order('created_at');
+  if (error) return migrationMissing('La chronologie');
+  state.timeline = data;
+  const item = (e) => `
+    <li class="tl-item ${e.highlight ? 'major' : ''}">
+      <span class="tl-dot" aria-hidden="true">${esc(e.icon || '✦')}</span>
+      <div class="card tl-card">
+        <span class="tl-era">${esc(e.era)}</span>
+        <h3>${esc(e.title)}</h3>
+        ${e.content ? `<div class="post-body">${renderContent(e.content)}</div>` : ''}
+        ${e.topic ? `<p class="small"><a href="#/t/${e.topic.id}">📜 Relire le RP : ${esc(e.topic.title)}</a></p>` : ''}
+        ${isStaff() ? `<p class="tl-tools small"><button class="link" data-edit-tl="${e.id}">Modifier</button> <button class="link danger" data-del-tl="${e.id}">Supprimer</button></p>` : ''}
+      </div>
+    </li>`;
+  return `<div class="page-head"><div><h1>Chronologie de Paris</h1><p class="muted">De la Fracture à aujourd’hui. Les événements sont écrits par l’équipe, au fil des intrigues.</p></div>
+      ${isStaff() ? '<button class="btn" id="new-tl">+ Ajouter un événement</button>' : ''}</div>
+    ${data.length ? `<ol class="timeline">${data.map(item).join('')}</ol>` : '<div class="card empty">La chronologie est encore vierge.</div>'}`;
+}
+viewTimeline.after = (root, _, params) => {
+  const list = state.timeline || [];
+  const open = (e = {}) => {
+    const next = list.length ? Math.max(...list.map((x) => x.position)) + 10 : 10;
+    const m = modal(e.id ? 'Modifier l’événement' : 'Nouvel événement', `<form>
+      <div class="form-grid">
+        <label>Date dans l’univers<input name="era" required maxlength="60" value="${esc(e.era || '')}" placeholder="Ex. : An 3, Hiver de l’An 4"></label>
+        <label>Icône<input name="icon" maxlength="8" value="${esc(e.icon || '✦')}"></label>
+        <label>Ordre <span class="muted">(plus petit = plus ancien)</span><input name="position" type="number" value="${e.position ?? next}"></label>
+        <label>Sujet RP lié <span class="muted">(son adresse ou son numéro, facultatif)</span><input name="topic" value="${e.topic_id ? `#/t/${e.topic_id}` : ''}" placeholder="#/t/123"></label>
+      </div>
+      <label>Titre<input name="title" required minlength="2" maxlength="120" value="${esc(e.title || '')}"></label>
+      <label>Récit <span class="muted">(Markdown)</span><textarea name="content" rows="6" maxlength="8000">${esc(e.content || '')}</textarea></label>
+      <label class="check"><input type="checkbox" name="highlight" ${e.highlight ? 'checked' : ''}> Événement majeur (mis en valeur)</label>
+      <div class="form-actions"><button type="button" class="btn btn-ghost" data-close>Annuler</button><button class="btn">Enregistrer</button></div></form>`);
+    m.querySelector('form').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      const tm = /(\d+)\D*$/.exec(f.topic.value.trim());
+      const row = { era: f.era.value.trim(), icon: f.icon.value.trim() || '✦', position: Number(f.position.value) || 0, title: f.title.value.trim(), content: f.content.value.trim() || null, highlight: f.highlight.checked, topic_id: tm ? Number(tm[1]) : null, updated_at: new Date().toISOString() };
+      try {
+        if (e.id) await q(sb.from('timeline_events').update(row).eq('id', e.id));
+        else await q(sb.from('timeline_events').insert({ ...row, created_by: state.profile.id }));
+        m.remove(); toast('Chronologie mise à jour.', 'ok');
+        if (location.hash.includes('?')) go('#/chronologie'); else router();
+      } catch (err) { fail(/foreign key/i.test(err.message || '') ? new Error('Ce sujet n’existe pas : vérifiez son numéro.') : err); }
+    };
+  };
+  root.querySelector('#new-tl')?.addEventListener('click', () => open());
+  root.querySelectorAll('[data-edit-tl]').forEach((b) => b.addEventListener('click', () => open(list.find((x) => x.id === Number(b.dataset.editTl)))));
+  root.querySelectorAll('[data-del-tl]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Supprimer cet événement de la chronologie ?')) return;
+    try { await q(sb.from('timeline_events').delete().eq('id', Number(b.dataset.delTl))); router(); } catch (err) { fail(err); }
+  }));
+  if (isStaff() && params?.get('ajouter')) open({ title: params.get('titre') || '', icon: params.get('icone') || '✦', topic_id: Number(params.get('sujet')) || null });
 };
 
 // ---------------------------------------------------------------------
