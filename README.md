@@ -1,6 +1,8 @@
-# Les Chroniques de Lumière
+# Paris Fracturé
 
-Forum de **jeu de rôle par écrit (RPG)** francophone dans l'univers de **Clair Obscur : Expedition 33**, 100 % gratuit à héberger.
+Forum de **jeu de rôle par écrit (RPG)** francophone inspiré de **Clair Obscur : Expedition 33**, 100 % gratuit à héberger.
+
+> La Fracture a fini par venir dans le monde réel : seule la ville de Paris a survécu. Peintres et Écrivains se disputent le monopole de la création du nouveau monde ; les Musiciens, neutres, sont divisés entre les deux camps.
 
 - **Site** : fichiers statiques (HTML, CSS, JavaScript) publiés par **GitHub Pages**.
 - **Base de données SQL** : **Supabase** (PostgreSQL), qui fournit aussi les comptes utilisateurs et la sécurité.
@@ -13,8 +15,19 @@ Forum de **jeu de rôle par écrit (RPG)** francophone dans l'univers de **Clair
 - **Validation des fiches** par l'équipe : brouillon › en attente › validée / à retravailler (avec une note pour le joueur) › archivée
 - **Zones RP et HRP** : dans les zones « en jeu », on poste **en incarnant un personnage validé** (choisi dans une liste) ; l'équipe peut poster en **Narrateur**. Dans les zones « hors-jeu », on parle en tant que joueur. Ces règles sont vérifiées par la base de données elle-même.
 - **Galerie des personnages** filtrable par camp, page de chaque personnage avec ses dernières apparitions
+- **Personnages prédéfinis** : rôles proposés par l'équipe ou demandés par les membres (validés par l'équipe), à réserver en un clic avec une fiche pré-remplie ; statut disponible, réservé ou pris
 - **Pages « Univers »** (contexte, lieux, guide de création, règlement RP) que l'équipe rédige et modifie depuis le site
-- 6 zones RP (Lumière, le Port, le Continent, le Camp, Souvenirs, Événements) et 5 zones HRP créées au départ, toutes modifiables
+- **Factions** : Peintres, Écrivains, Musiciens (Healers, Dreamers, Discordants, sans culte) ou sans allégeance, chacune avec sa couleur et son blason sur les fiches, les messages et l'accueil (« Forces en présence »)
+- **Territoires de Paris** comme zones RP : rues neutres, Montmartre, Quartier Latin, Catacombes, la Seine, zones de fracture ouverte, failles oniriques, chroniques (événements) ; plus 5 zones HRP. Toutes modifiables.
+
+### Vie du forum (nouveautés)
+- **Notifications** (🔔 dans le menu) : quand quelqu'un répond à votre sujet RP (ou à un sujet RP où vous avez joué), vous cite avec le bouton « Citer », ou vous mentionne avec `@pseudo` ; aussi pour les liens, badges, fiches validées et fractures
+- **Liens entre personnages** (famille, amitié, amour, alliance, rivalité, inimitié, mentor…) proposés depuis une fiche, acceptés par l'autre joueur, affichés sur les deux fiches
+- **Chronologie de Paris** (menu *Univers*) : les grands événements depuis la Fracture, écrits par l'équipe, liables à un sujet RP
+- **Carte interactive** (menu *Carte*) : survolez un territoire pour le découvrir, cliquez pour entrer dans son forum
+- **Bottin des avatars** : champ « Visage » dans les fiches, page de recherche « ce visage est-il déjà pris ? »
+- **Points RP et badges** : points gagnés en jouant (barème sur le *Tableau d'honneur*), badges automatiques ou décernés par l'équipe, affichés sur les profils
+- **Zones de fracture aléatoires** : le Narrateur ouvre en un clic une fracture surprise (territoire et effet tirés au sort), avec bannière sur l'accueil et la carte, notification à tous et badge pour les participants
 
 ### Forum
 - Catégories (salons) avec compteurs de sujets et de messages
@@ -25,10 +38,12 @@ Forum de **jeu de rôle par écrit (RPG)** francophone dans l'univers de **Clair
 - Profils : avatar, devise, présentation, statistiques, messages récents
 - Liste des membres et de l'équipe
 - Recherche dans les titres et les messages
+- **Messagerie privée** : conversations à plusieurs, compteur de messages non lus dans le menu, messages de l'équipe à tous les membres
 - Modération : fiches à valider, épingler, verrouiller, déplacer, renommer, supprimer, signalements, bannissement
 - Administration : rôles (membre, gardien, administrateur) et gestion des catégories (type RP ou HRP)
 - Sécurité côté base de données (Row Level Security) : même en contournant le site, personne ne peut faire plus que ses droits
-- Thème original « Belle Époque nocturne », adapté au mobile
+- Deux thèmes au choix : **sombre** « Belle Époque nocturne » et **clair** « Parchemin & feuille d'or », bouton ☀ / ☾ dans l'en-tête, choix mémorisé (par défaut : réglage de l'appareil)
+- Adapté au mobile
 
 ## Installation (environ 15 minutes)
 
@@ -70,6 +85,38 @@ Dans Supabase : **Authentication** › **URL Configuration** :
 
 Sans cela, les liens de confirmation et de mot de passe oublié reçus par e-mail ne ramèneront pas sur le forum.
 
+### Mise à jour : notifications, liens, chronologie, carte, bottin, points & badges, fractures
+
+Si votre forum était déjà installé, exécutez une fois [`supabase/migration-nouveautes.sql`](supabase/migration-nouveautes.sql) dans le **SQL Editor** (rien n'est supprimé, le script peut être relancé). Il calcule aussi les points de tous les membres à partir des messages déjà écrits.
+
+- **Fracture surprise** : *Univers › Zones de fracture* (ou *Modération › ⚡ Fractures*). Laissez « Au hasard » : le territoire et l'effet sont tirés au sort, un sujet épinglé est ouvert au nom du Narrateur et tous les membres sont prévenus. Elle se referme seule à la fin de la durée choisie.
+- **Points & badges** : *Membres › Tableau d'honneur*. L'équipe crée des badges (manuels ou automatiques) et donne points ou badges depuis le profil d'un membre.
+- **Chronologie** : l'équipe ajoute, modifie et ordonne les événements depuis la page elle-même.
+
+### Mise à jour : personnages prédéfinis
+
+Si votre forum était déjà installé, exécutez une fois [`supabase/migration-predefinis.sql`](supabase/migration-predefinis.sql) dans le **SQL Editor**. Rien n'est supprimé, et le script peut être relancé sans danger.
+
+- **L'équipe** crée des prédéfinis (nom, faction, image, histoire, attentes) depuis *Personnages › Prédéfinis*.
+- **Un membre** clique sur « Je veux le jouer » : une fiche pré-remplie est créée à son nom, il la complète et l'envoie en validation. Le prédéfini passe en **Réservé**, puis en **Pris** quand l'équipe valide la fiche. Si la fiche est supprimée avant validation, le prédéfini redevient disponible.
+- **Un membre** peut aussi remplir une **demande de prédéfini** (par exemple un proche de son personnage). L'équipe la valide (elle est alors publiée avec le nom du demandeur) ou la refuse avec une note ; le membre peut corriger et renvoyer.
+
+### Mise à jour : messagerie privée
+
+Si votre forum était déjà installé, exécutez une fois [`supabase/migration-messagerie.sql`](supabase/migration-messagerie.sql) dans le **SQL Editor**. Il ajoute la messagerie privée : conversations entre un ou plusieurs membres (seuls les participants peuvent les lire), et messages de l'équipe à **tous les membres** (lisibles par tous, sans réponse possible). Rien n'est supprimé.
+
+### Mise à jour : nouvelle page d'accueil
+
+Si votre forum était déjà installé, exécutez une fois [`supabase/migration-accueil.sql`](supabase/migration-accueil.sql) dans le **SQL Editor** : il active la liste « Présents ces dernières 24 heures ». Sans lui, l'accueil fonctionne mais n'affiche pas cette liste.
+
+### Mise à jour : univers « Paris après la Fracture »
+
+Si votre forum était déjà installé avant cette version, exécutez une fois [`supabase/migration-paris.sql`](supabase/migration-paris.sql) dans le **SQL Editor**. Il renomme les anciennes zones RP en territoires de Paris (les sujets sont conservés), ajoute les nouveaux territoires, remplit les pages d'univers et passe les anciennes factions des personnages en « Sans allégeance ». Aucun sujet, message, membre ni personnage n'est supprimé.
+
+### Mise à jour : envoi d'images
+
+Si vous avez installé le forum avant l'ajout de l'envoi d'images, exécutez une fois [`supabase/avatars.sql`](supabase/avatars.sql) dans le **SQL Editor** (il est déjà inclus dans `schema.sql` pour une nouvelle installation). Les membres peuvent alors envoyer leur avatar et l'image de leurs personnages depuis leur ordinateur (2 Mo maximum, stockés gratuitement dans Supabase, 1 Go inclus).
+
 ### 5. Devenir administrateur
 
 1. Inscrivez-vous sur votre forum et confirmez votre e-mail.
@@ -83,7 +130,7 @@ update public.profiles set role = 'admin' where username = 'VotrePseudo';
 
 ### 6. Personnaliser l'univers
 
-Menu **Univers** : complétez les pages **Le contexte** et **Les lieux** (époque du forum, nombre actuellement peint, personnages canons jouables ou non…) avec le bouton **Modifier**. Vous pouvez ajouter autant de pages que vous voulez.
+Menu **Univers** : les pages **La Fracture**, **Les factions** et **Paris aujourd'hui** sont déjà remplies. Modifiez-les ou ajoutez-en d'autres (personnages importants, chronologie…) avec les boutons **Modifier** et **+ Nouvelle page**.
 
 ## Le parcours d'un joueur
 
@@ -121,6 +168,7 @@ css/style.css         thème visuel
 js/config.js          vos clés Supabase et le nom du forum
 js/app.js             toute la logique (navigation, pages, appels à la base)
 supabase/schema.sql   tables, règles de sécurité, catégories et pages d'univers de départ
+supabase/migration-*.sql  mises à jour pour un forum déjà installé
 ```
 
 ---
